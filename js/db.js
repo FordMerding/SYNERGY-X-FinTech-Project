@@ -1,9 +1,9 @@
 const DB = {
     init: function() {
-            if (!localStorage.getItem('flowup_db')) {
+            if (!localStorage.getItem('abusafin_db')) {
             const emptyStructure = {
                 users: [
-                    { id: 'u_admin', login: 'admin', pass: '123', name: 'Администратор', company: 'FlowUp Corp', isAdmin: true, autoApproveAI: false },
+                    { id: 'u_admin', login: 'admin', pass: '123', name: 'Администратор', company: 'AbusaFin Corp', isAdmin: true, autoApproveAI: false },
                     { id: 'u_1', login: 'user1', pass: '123', name: 'Иван (User 1)', company: 'Tech Logistics', isAdmin: false, autoApproveAI: false },
                     { id: 'u_2', login: 'user2', pass: '123', name: 'Олег (User 2)', company: 'Fast Liquidity Ltd', isAdmin: false, autoApproveAI: false }
                 ],
@@ -15,12 +15,12 @@ const DB = {
                 contracts: [],
                 externalDb: [] 
             };
-            localStorage.setItem('flowup_db', JSON.stringify(emptyStructure));
+            localStorage.setItem('abusafin_db', JSON.stringify(emptyStructure));
         }
     },
 
-    getData: () => JSON.parse(localStorage.getItem('flowup_db')),
-    saveData: (data) => localStorage.setItem('flowup_db', JSON.stringify(data)),
+    getData: () => JSON.parse(localStorage.getItem('abusafin_db')),
+    saveData: (data) => localStorage.setItem('abusafin_db', JSON.stringify(data)),
 
     login: function(login, pass) {
         const data = this.getData();

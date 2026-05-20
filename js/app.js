@@ -291,7 +291,7 @@ const App = {
         const panel = document.getElementById('assistantPanel');
         panel.classList.toggle('open');
         if(panel.classList.contains('open') && document.getElementById('assistant-history').children.length === 0) {
-            this.addChatMsg('assistant-history', 'AI', 'Привет! Я ассистент FlowUp. Могу проанализировать расходы или связать вас с другим аккаунтом. Напишите "найти аккаунт [ID]".');
+            this.addChatMsg('assistant-history', 'AI', 'Привет! Я ассистент AbusaFin. Могу проанализировать расходы или связать вас с другим аккаунтом. Напишите "найти аккаунт [ID]".');
         }
     },
 
