@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AbusaFin • Полноценная финансовая платформа</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/js/particles.js" defer></script>
+    <script src="/js/app.js" defer></script>
+</head>
+<body>
+
+<div id="login-screen" class="screen active">
+    <canvas id="particles-canvas"></canvas>
+    <div class="login-box">
+        <h1 style="color: white; margin-bottom: 20px;">AbusaFin</h1>
+        <input type="text" id="auth-login" placeholder="Логин (admin / user1 / user2)">
+        <input type="password" id="auth-pass" placeholder="Пароль (123)">
+        <button class="btn btn-primary" onclick="App.login()">Войти</button>
+        <p style="color: #94a3b8; font-size: 12px; margin-top: 15px;">Демо: admin/123 • user1/123 • user2/123</p>
+    </div>
+</div>
+
+<div id="app-screen" class="screen">
+    <div class="app-container">
+        
+        <aside class="sidebar">
+            <div class="logo">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-9 5 18 3-9h5"/></svg>
+                AbusaFin
+            </div>
+            <div class="nav-item active" onclick="App.navigate('dashboard')">Dashboard</div>
+            <div class="nav-item" onclick="App.navigate('accounts')">Счета</div>
+            <div class="nav-item" onclick="App.navigate('p2p')">Сделки (P2P Контракты)</div>
+            <div class="nav-item" onclick="App.navigate('profile')">Мой профиль</div>
+            <div class="nav-item" id="nav-admin" onclick="App.navigate('admin')" style="display: none;">Admin Panel</div>
+            
+            <div class="user-mini-profile">
+                <div class="avatar"></div>
+                <span id="sidebar-username">User</span>
+                <button onclick="App.logout()" style="background:none; border:none; color: var(--text-muted); cursor:pointer; margin-left:auto; display:flex; align-items:center; gap:5px; font-size:13px; padding:4px 8px;" title="Выйти из аккаунта">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    <span style="font-weight:500;">Выйти</span>
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            
+            <!-- DASHBOARD -->
+            <div id="page-dashboard" class="page active">
+                <h1>Обзор (Dashboard) &amp; ИИ Предиктор</h1>
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-title">Общий капитал</div>
+                        <div class="kpi-value" id="kpi-total">$0</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-title">Свободный кэш</div>
+                        <div class="kpi-value" id="kpi-available">$0</div>
+                    </div>
+                    <div class="kpi-card" style="border-color: var(--primary);">
+                        <div class="kpi-title" style="color: var(--primary);">AI Прогноз (Статус)</div>
+                        <div class="kpi-value" id="ai-status" style="font-size: 15px; line-height: 1.3;">Сбор данных...</div>
+                    </div>
+                </div>
+                <div class="chart-card" style="margin-bottom: 24px;">
+                    <h3>График предиктора (Реальное время + Прогноз)</h3>
+                    <div class="chart-container" style="height: 260px;">
+                        <canvas id="predictorChart"></canvas>
+                    </div>
+                    <small style="color:var(--text-muted); display:block; margin-top:8px;">Серверный AI Predictor анализирует все счета в реальном времени и автоматически ребалансирует при рисках (если включено).</small>
+                </div>
+            </div>
+
+            <!-- ACCOUNTS -->
+            <div id="page-accounts" class="page">
+                <h1>Мои счета</h1>
+                <div class="accounts-grid" id="accountsList"></div>
+            </div>
+
+            <!-- P2P CONTRACTS -->
+            <div id="page-p2p" class="page">
+                <h1>P2P Сделки — Смарт-Контракты Взаимопомощи</h1>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                    
+                    <!-- Create contract form -->
+                    <div class="chart-card">
+                        <h3>Шаг 1: Создать новый контракт</h3>
+                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Вы предоставляете обеспечение, партнёр открывает вам скоростной шлюз.</p>
+                        
+                        <div class="form-group">
+                            <label>Мой счёт-донор (откуда спишутся средства):</label>
+                            <select id="contractSourceAcc" class="form-input"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Партнёр (получатель контракта):</label>
+                            <select id="contractPartner" class="form-input"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Сумма обеспечения ($):</label>
+                            <input type="number" id="contractAmount" value="10000" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Лимит трат на арендуемом шлюзе ($):</label>
+                            <input type="number" id="contractLimit" value="8500" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Комиссия за услугу ($):</label>
+                            <input type="number" id="contractFee" value="450" class="form-input">
+                        </div>
+                        
+                        <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="App.createP2PContract()">Сформировать смарт-контракт</button>
+                    </div>
+
+                    <!-- Contracts list -->
+                    <div class="chart-card" style="display:flex; flex-direction:column;">
+                        <h3>Мои контракты</h3>
+                        <div id="p2p-contract-list" style="flex:1; overflow-y:auto; min-height:320px; background:#f8fafc; border-radius:8px; padding:12px; margin-top:8px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PROFILE -->
+            <div id="page-profile" class="page">
+                <h1>Профиль компании</h1>
+                <div class="chart-card" style="max-width: 520px;">
+                    <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 20px;">
+                        <div style="width: 100px; height: 100px; border-radius: 50%; background: var(--bg-color); border: 2px solid var(--primary);"></div>
+                        <div>
+                            <h2 id="profile-name">Название</h2>
+                            <p style="color: var(--text-muted);" id="profile-company">Компания</p>
+                        </div>
+                    </div>
+                    <p><strong>ID Аккаунта:</strong> <span id="profile-id"></span></p>
+                    <p><strong>Роль:</strong> <span id="profile-role"></span></p>
+                    
+                    <div style="margin-top: 30px; background:#f1f5f9; padding:16px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <strong>Безопасность ИИ Предиктора</strong><br>
+                            <small style="color:var(--text-muted)">Разрешить автоматические переброски средств при рисках</small>
+                        </div>
+                        <input type="checkbox" id="aiToggle" onchange="App.toggleAISafety(this.checked)" style="width:22px; height:22px; cursor:pointer; accent-color: var(--primary);">
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN -->
+            <div id="page-admin" class="page">
+                <h1>Панель администратора</h1>
+                <div class="chart-card" style="max-width: 520px;">
+                    <h3>Создание внешнего банковского счёта (для привязки пользователям)</h3>
+                    <input type="text" id="adminAccName" placeholder="Название (напр. Bank of America SEPA)" class="form-input">
+                    <input type="number" id="adminAccBalance" value="25000" class="form-input">
+                    <select id="adminAccType" class="form-input">
+                        <option value="SEPA">SEPA (Быстро, 5 сек)</option>
+                        <option value="SWIFT">SWIFT (Средне, 10 сек)</option>
+                        <option value="CARD">Card Processing (Долго, 20 сек)</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="App.generateExternalAccount()" style="width:100%; margin-top:8px;">Создать внешний счёт и получить API Ключ</button>
+                    <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">После создания скопируйте ключ и передайте пользователю для привязки во вкладке «Счета».</p>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- System logs -->
+        <div class="system-notifications">
+            <h3 style="font-size: 14px; margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">Системные логи (реал-тайм)</h3>
+            <div id="sys-logs"></div>
+        </div>
+    </div>
+
+    <!-- Account Detail Panel -->
+    <div class="side-panel right" id="accountPanel">
+        <div class="panel-header">
+            <h2 id="panelAccName">Счёт</h2>
+            <button class="close-btn" onclick="App.closeAccountPanel()">×</button>
+        </div>
+        <div class="panel-content">
+            <h3 style="color: var(--primary-dark); font-size: 26px; margin-bottom:4px;" id="panelAccBalance">$0</h3>
+            <div class="badge" id="panelAccType" style="margin-bottom: 22px;">Тип</div>
+            
+            <div class="form-group">
+                <label>Несгораемый остаток (НЗ / Резерв)</label>
+                <div style="display:flex; gap:10px;">
+                    <input type="number" id="panelReserve" class="form-input">
+                    <button class="btn btn-secondary" onclick="App.saveReserve()">Сохранить</button>
+                </div>
+            </div>
+
+            <div style="margin-top: 32px; background: var(--bg-color); padding: 18px; border-radius: 10px;">
+                <h4 style="margin-bottom:12px;">Перевод средств</h4>
+                <select id="transferTarget" class="form-input"></select>
+                <input type="number" id="transferAmount" placeholder="Сумма" class="form-input">
+                <button class="btn btn-primary" style="width:100%; margin-top:8px;" onclick="App.executeTransfer()">Отправить</button>
+                <small style="color:var(--text-muted); display:block; margin-top:6px;">Переводы между любыми счетами (в т.ч. других пользователей) с задержкой по типу системы.</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAT / NEGOTIATION MODAL (side panel style, same design language) -->
+    <div class="side-panel right" id="chatModal" style="width: 440px; z-index: 200; box-shadow: -6px 0 30px rgba(0,0,0,0.18); display: none;">
+        <div class="panel-header">
+            <div>
+                <h2 id="chatPartnerName" style="font-size:18px; margin:0;">Переговоры</h2>
+                <small id="chatContext" style="color:var(--text-muted); font-size:11px;"></small>
+            </div>
+            <button class="close-btn" onclick="App.closeChatModal()" style="font-size:28px; line-height:1;">×</button>
+        </div>
+        <div class="panel-content" style="padding:0; display:flex; flex-direction:column; height: calc(100% - 62px);">
+            
+            <!-- Messages -->
+            <div id="chatMessages" style="flex:1; overflow-y:auto; padding:16px; background:#f8fafc; font-size:13.5px; line-height:1.45;"></div>
+            
+            <!-- Draft Contract / Propose section -->
+            <div style="border-top:1px solid var(--border); padding:14px 16px; background:white;">
+                <div style="margin-bottom:8px; font-weight:600; color:var(--primary-dark); font-size:13px;">Оформление контракта (обе стороны заполняют)</div>
+                
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
+                    <!-- Seeker part -->
+                    <div>
+                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">СТОРОНА А — АРЕНДАТОР ШЛЮЗА (вы платите)</div>
+                        <select id="chatSeekerAccount" class="form-input" style="font-size:12px; padding:6px 8px; margin-bottom:4px;"></select>
+                        <input type="number" id="chatSeekerAmount" placeholder="Сумма к оплате за услугу $" class="form-input" style="font-size:12px; padding:6px 8px;">
+                        <button class="btn btn-secondary" style="width:100%; padding:6px; font-size:12px; margin-top:4px;" onclick="App.proposeMyContractPart('seeker')">Отправить мою часть (А)</button>
+                    </div>
+                    
+                    <!-- Provider part -->
+                    <div>
+                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">СТОРОНА Б — ПРОВАЙДЕР ШЛЮЗА (вы получаете)</div>
+                        <select id="chatProviderAccount" class="form-input" style="font-size:12px; padding:6px 8px; margin-bottom:4px;"></select>
+                        <input type="number" id="chatProviderAmount" placeholder="Сумма которую получите $" class="form-input" style="font-size:12px; padding:6px 8px;">
+                        <button class="btn btn-secondary" style="width:100%; padding:6px; font-size:12px; margin-top:4px;" onclick="App.proposeMyContractPart('provider')">Отправить мою часть (Б)</button>
+                    </div>
+                </div>
+                
+                <div id="chatDraftStatus" style="font-size:11.5px; color:#64748b; margin:6px 0 8px; min-height:18px;"></div>
+                
+                <button id="chatSignBtn" class="btn btn-primary" style="width:100%; padding:9px; font-weight:700; display:none;" onclick="App.signFinalContract()">
+                    ✍️ ПОДПИСАТЬ ФИНАЛЬНЫЙ КОНТРАКТ (оба должны подписать)
+                </button>
+            </div>
+            
+            <!-- Message input -->
+            <div style="padding:12px 16px; border-top:1px solid var(--border); background:white; display:flex; gap:8px;">
+                <input type="text" id="chatInput" placeholder="Сообщение партнёру..." class="form-input" style="flex:1; margin:0; font-size:13px;" onkeypress="if(event.key==='Enter') App.sendChatMessage()">
+                <button class="btn btn-primary" style="padding:8px 16px; font-size:13px;" onclick="App.sendChatMessage()">→</button>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
