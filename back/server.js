@@ -734,29 +734,32 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
       return sendJSON(res, { error: 'Нет доступа' }, 403);
     }
 
-    const { role, accountId, amount } = body; // role = 'seeker' or 'provider'
-    if (!role || !accountId || !amount) return sendJSON(res, { error: 'Неполные данные предложения' }, 400);
+    const { role, payments } = body; // role = 'seeker' or 'provider', payments = [{accountId, amount}, ...]
+    if (!role || !Array.isArray(payments)) return sendJSON(res, { error: 'Неполные данные: role и массив payments required' }, 400);
 
     const isSeeker = currentUser.id === conv.seekerId;
     if ((role === 'seeker' && !isSeeker) || (role === 'provider' && isSeeker)) {
       return sendJSON(res, { error: 'Вы не можете заполнять часть другой стороны' }, 403);
     }
 
-    // Validate account belongs to current user
-    const myAcc = db.accounts.find(a => a.id === accountId && a.userId === currentUser.id);
-    if (!myAcc) return sendJSON(res, { error: 'Счет не найден или не ваш' }, 404);
+    // Validate all accounts belong to current user and amounts positive
+    for (const p of payments) {
+      if (!p.accountId || typeof p.amount !== 'number' || p.amount <= 0) {
+        return sendJSON(res, { error: 'Некорректная сумма или счёт в payments' }, 400);
+      }
+      const myAcc = db.accounts.find(a => a.id === p.accountId && a.userId === currentUser.id);
+      if (!myAcc) return sendJSON(res, { error: `Счёт ${p.accountId} не найден или не ваш` }, 404);
+    }
 
-    // Support multiple accounts: push to array (user can add several sources/destinations)
+    // Replace the whole side array (allows edit amounts + add/remove in one go)
     if (role === 'seeker') {
-      if (!conv.draftContract.seekerPayments) conv.draftContract.seekerPayments = [];
-      conv.draftContract.seekerPayments.push({ accountId, amount: parseFloat(amount) });
+      conv.draftContract.seekerPayments = payments.map(p => ({ accountId: p.accountId, amount: parseFloat(p.amount) }));
     } else {
-      if (!conv.draftContract.providerReceives) conv.draftContract.providerReceives = [];
-      conv.draftContract.providerReceives.push({ accountId, amount: parseFloat(amount) });
+      conv.draftContract.providerReceives = payments.map(p => ({ accountId: p.accountId, amount: parseFloat(p.amount) }));
     }
     saveDB();
 
-    addLog(`📝 ${currentUser.name} добавил часть контракта (${role})`, [currentUser.id]);
+    addLog(`📝 ${currentUser.name} обновил часть контракта (${role}) — ${payments.length} счёт(ов)`, [currentUser.id]);
     return sendJSON(res, { success: true, draft: conv.draftContract });
   }
 
@@ -799,7 +802,7 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
     conv.status = 'SIGNED_PENDING';
     conv.signedAt = new Date().toISOString();
 
-    addLog(`✍️ Контракт подписан обеими сторонами. Автоматическое исполнение через 25 секунд. Можно отменить.`, [conv.seekerId, conv.providerId]);
+    addLog(`✍️ Контракт подписан обеими сторонами. Автоматическое исполнение через 30 секунд. Можно отменить.`, [conv.seekerId, conv.providerId]);
 
     // Clear any previous pending timeout
     if (pendingExecutions[convKey]) {
@@ -814,14 +817,14 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
         console.error('Delayed contract execution error:', e);
       }
       delete pendingExecutions[convKey];
-    }, 25000);
+    }, 30000);
 
     saveDB();
     return sendJSON(res, { 
       success: true, 
       pendingExecution: true, 
-      delaySeconds: 25,
-      message: 'Контракт в статусе ожидания. У вас есть 25 секунд на отмену.' 
+      delaySeconds: 30,
+      message: 'Контракт в статусе ожидания. У вас есть 30 секунд на отмену.' 
     });
   }
 

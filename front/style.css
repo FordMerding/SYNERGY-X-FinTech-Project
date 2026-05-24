@@ -434,3 +434,236 @@ h1 {
 .contract-box:last-child {
     margin-bottom: 0;
 }
+
+/* ========== NEW CONTRACT MODAL (overlay, 2-step wizard) ========== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--white);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 980px;
+    max-height: 92vh;
+    overflow: hidden;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.35);
+    display: flex;
+    flex-direction: column;
+    margin: 20px;
+
+    position: relative;
+    z-index: 10;
+}
+
+.modal-header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8fafc;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 22px;
+    color: var(--primary-dark);
+}
+
+.stepper {
+    display: flex;
+    gap: 0;
+    padding: 0 28px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+}
+
+.step {
+    flex: 1;
+    padding: 14px 20px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 14.5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.step.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    background: white;
+}
+
+.step:hover:not(.active) {
+    color: var(--text-main);
+}
+
+.modal-body {
+    padding: 28px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 420px;
+}
+
+.contract-side-panel {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+}
+
+.contract-side-panel h4 {
+    margin: 0 0 14px 0;
+    font-size: 15px;
+    color: var(--primary-dark);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.contract-acc-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    position: relative;
+}
+
+.contract-acc-card .acc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.contract-acc-card .acc-name {
+    font-weight: 600;
+    font-size: 14.5px;
+}
+
+.contract-acc-card .remove-btn {
+    background: #fee2e2;
+    color: #ef4444;
+    border: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.contract-acc-card .remove-btn:hover {
+    background: #fecaca;
+}
+
+.contract-acc-card .amount-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.contract-acc-card .amount-row input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 14px;
+}
+
+.add-card-btn {
+    width: 100%;
+    padding: 10px;
+    border: 2px dashed var(--primary);
+    background: rgba(30,80,255,0.04);
+    color: var(--primary);
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 6px;
+}
+
+.add-card-btn:hover {
+    background: rgba(30,80,255,0.08);
+    border-style: solid;
+}
+
+.modal-footer {
+    padding: 18px 28px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    background: #f8fafc;
+}
+
+.preview-summary {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.preview-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.preview-row:last-child {
+    border-bottom: none;
+}
+
+.signature-status {
+    display: flex;
+    gap: 20px;
+    margin: 16px 0;
+}
+
+.sig-pill {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sig-pill.signed {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.sig-pill.pending {
+    background: #fef3c7;
+    color: #854d0e;
+}
+
+.countdown {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--warning);
+    text-align: center;
+    margin: 12px 0;
+}

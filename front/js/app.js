@@ -7,6 +7,10 @@ const App = {
     lastRenderedLogTime: null,
     currentChatKey: null,
     chatPollInterval: null,
+    // NEW contract modal state
+    currentContractConvKey: null,
+    contractModalStep: 1,
+    contractData: null,
 
     // ============ AUTH ============
     login: async function() {
@@ -288,7 +292,16 @@ const App = {
         try {
             const res = await fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } });
             if (!res.ok) throw new Error('Failed to load accounts');
-            const accounts = await res.json();
+            let accounts = await res.json();
+
+            // ИСПРАВЛЕНО: Скрываем (уничтожаем) временные счета, если их лимит исчерпан
+            accounts = accounts.filter(acc => {
+                if (acc.isTemporary) {
+                    const available = acc.spendLimit !== undefined ? acc.spendLimit : (acc.balance || 0);
+                    return available > 0;
+                }
+                return true;
+            });
 
             accounts.forEach(acc => {
                 const el = document.createElement('div');
@@ -343,12 +356,12 @@ const App = {
         // Populate transfer targets (all my accounts except current)
         const select = document.getElementById('transferTarget');
         select.innerHTML = '';
-        // We need all accounts of current user for targets - fetch again or use closure
         fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } })
             .then(r => r.json())
             .then(accounts => {
                 accounts.forEach(a => {
-                    if (a.id !== acc.id) {
+                    // ИСПРАВЛЕНО: Исключаем текущий счет И все временные счета (они не могут получать переводы)
+                    if (a.id !== acc.id && !a.isTemporary) {
                         const opt = document.createElement('option');
                         opt.value = a.id;
                         opt.textContent = `${a.name} ($${(a.balance||0).toLocaleString()})`;
@@ -380,7 +393,17 @@ const App = {
         if (!this.currentOpenedAcc) return;
         const targetId = document.getElementById('transferTarget').value;
         const amount = parseFloat(document.getElementById('transferAmount').value);
+        
         if (!targetId || isNaN(amount) || amount <= 0) return alert('Выберите счёт и укажите сумму');
+
+        // ИСПРАВЛЕНО: Защита от использования больше чем лимит
+        const maxAvailable = this.currentOpenedAcc.isTemporary 
+            ? (this.currentOpenedAcc.spendLimit || this.currentOpenedAcc.balance || 0)
+            : ((this.currentOpenedAcc.balance || 0) - (this.currentOpenedAcc.reserve || 0));
+
+        if (amount > maxAvailable) {
+            return alert(`Ошибка: Превышен доступный лимит. Максимум для списания: $${maxAvailable.toLocaleString()}`);
+        }
 
         try {
             const res = await fetch('/api/transfer', {
@@ -762,81 +785,11 @@ const App = {
                 }
             }
 
-            // Render draft status
-            const draft = conv.draftContract || {};
-            const statusEl = document.getElementById('chatDraftStatus');
-            const signBtn = document.getElementById('chatSignBtn');
-
-            let statusText = '';
-            const seekerPayments = draft.seekerPayments || (draft.seekerPayment ? [draft.seekerPayment] : []);
-            const providerReceives = draft.providerReceives || (draft.providerReceive ? [draft.providerReceive] : []);
-
-            const seekerFilled = seekerPayments.length > 0;
-            const providerFilled = providerReceives.length > 0;
-
-            if (conv.status === 'SIGNED_PENDING') {
-                statusText = `⏳ Контракт подписан обеими сторонами. Исполнение через ~25 сек. <button onclick="App.cancelPendingContract()" style="margin-left:8px;padding:3px 10px;font-size:11px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;">Отменить</button>`;
-                if (signBtn) signBtn.style.display = 'none';
-            } else if (seekerFilled && providerFilled) {
-                const total = seekerPayments.reduce((s, p) => s + (p.amount || 0), 0);
-                statusText = `✅ Обе стороны заполнили части (всего $${total}). Можно подписывать.`;
-                if (signBtn) signBtn.style.display = 'block';
-            } else if (seekerFilled) {
-                statusText = `Сторона А заполнила ${seekerPayments.length} счёт(ов). Ожидаем часть Б.`;
-                if (signBtn) signBtn.style.display = 'none';
-            } else if (providerFilled) {
-                statusText = `Сторона Б заполнила ${providerReceives.length} счёт(ов). Ожидаем часть А.`;
-                if (signBtn) signBtn.style.display = 'none';
-            } else {
-                statusText = 'Обе стороны должны заполнить свои части (поддерживается несколько счетов).';
-                if (signBtn) signBtn.style.display = 'none';
-            }
-            if (statusEl) statusEl.innerHTML = statusText;
-
-            // Populate account selects (my accounts)
-            await this.populateChatAccountSelects(conv);
+            // NOTE: Old inline draft UI removed. Contract now handled in separate full-screen modal.
+            // Status of draft is shown inside the modal only.
 
         } catch (e) {
             if (!silent) console.warn('Chat load error', e);
-        }
-    },
-
-    populateChatAccountSelects: async function(conv) {
-        const myAccsRes = await fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } });
-        const myAccs = myAccsRes.ok ? await myAccsRes.json() : [];
-
-        const isSeeker = this.currentUser.id === conv.seekerId;
-
-        // Seeker select
-        const seekerSel = document.getElementById('chatSeekerAccount');
-        if (seekerSel) {
-            seekerSel.innerHTML = '';
-            myAccs.forEach(a => {
-                const opt = document.createElement('option');
-                opt.value = a.id;
-                opt.textContent = `${a.name} ($${ (a.balance||0).toLocaleString() })`;
-                seekerSel.appendChild(opt);
-            });
-            if (conv.draftContract && conv.draftContract.seekerPayment) {
-                seekerSel.value = conv.draftContract.seekerPayment.accountId;
-                document.getElementById('chatSeekerAmount').value = conv.draftContract.seekerPayment.amount;
-            }
-        }
-
-        // Provider select (only meaningful if I am provider)
-        const provSel = document.getElementById('chatProviderAccount');
-        if (provSel) {
-            provSel.innerHTML = '';
-            myAccs.forEach(a => {
-                const opt = document.createElement('option');
-                opt.value = a.id;
-                opt.textContent = `${a.name} ($${ (a.balance||0).toLocaleString() })`;
-                provSel.appendChild(opt);
-            });
-            if (conv.draftContract && conv.draftContract.providerReceive) {
-                provSel.value = conv.draftContract.providerReceive.accountId;
-                document.getElementById('chatProviderAmount').value = conv.draftContract.providerReceive.amount;
-            }
         }
     },
 
@@ -858,62 +811,443 @@ const App = {
         }
     },
 
-    proposeMyContractPart: async function(role) {
-        if (!this.currentChatKey) return;
+    // ============ NEW CONTRACT MODAL (2-STEP OVERLAY WIZARD) ============
+    openContractModal: async function() {
+        if (!this.currentChatKey) {
+            alert('Откройте чат переговоров для оформления контракта.');
+            return;
+        }
+        this.currentContractConvKey = this.currentChatKey;
+        this.contractModalStep = 1;
+        this.contractData = null;
 
-        const accId = document.getElementById(role === 'seeker' ? 'chatSeekerAccount' : 'chatProviderAccount').value;
-        const amount = parseFloat(document.getElementById(role === 'seeker' ? 'chatSeekerAmount' : 'chatProviderAmount').value);
+        const modal = document.getElementById('contractModal');
+        if (modal) modal.classList.add('active');
 
-        if (!accId || !amount || amount <= 0) {
-            alert('Выберите счёт и укажите сумму');
+        await this.loadContractDataAndRender();
+    },
+
+    closeContractModal: function(ev) {
+        const modal = document.getElementById('contractModal');
+        if (modal) modal.classList.remove('active');
+        this.currentContractConvKey = null;
+        this.contractData = null;
+        if (document.getElementById('page-p2p-negotiations')?.classList.contains('active')) {
+            this.renderP2PNegotiations();
+        }
+    },
+
+    switchContractStep: function(step) {
+        this.contractModalStep = step;
+        const tab1 = document.getElementById('step1-tab');
+        const tab2 = document.getElementById('step2-tab');
+        if (tab1) tab1.classList.toggle('active', step === 1);
+        if (tab2) tab2.classList.toggle('active', step === 2);
+
+        const nextBtn = document.getElementById('modalNextBtn');
+        const signBtn = document.getElementById('modalSignBtn');
+        const cancelBtn = document.getElementById('modalCancelBtn');
+
+        if (nextBtn) nextBtn.style.display = (step === 1) ? 'inline-block' : 'none';
+        if (signBtn) signBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+
+        this.renderContractModalContent();
+    },
+
+    loadContractDataAndRender: async function() {
+        if (!this.currentContractConvKey) return;
+
+        try {
+            // НОВОЕ: Загружаем счета пользователя, чтобы показывать названия вместо ID
+            if (!this.myAccounts) {
+                const accRes = await fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } });
+                if (accRes.ok) {
+                    this.myAccounts = await accRes.json();
+                }
+            }
+
+            const res = await fetch(`/api/conversations/${this.currentContractConvKey}`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            if (!res.ok) throw new Error('Не удалось загрузить данные контракта');
+            const data = await res.json();
+            this.contractData = data.conversation;
+
+            if (this.contractData.status === 'SIGNED_PENDING') {
+                this.contractModalStep = 2;
+            }
+
+            this.renderContractModalContent();
+
+            if (this.contractData.status === 'SIGNED_PENDING') {
+                this.startContractCountdown();
+            }
+        } catch (e) {
+            alert(e.message);
+            this.closeContractModal();
+        }
+    },
+
+    renderContractModalContent: function() {
+        const body = document.getElementById('contractModalBody');
+        if (!body || !this.contractData) return;
+
+        const conv = this.contractData;
+        const draft = conv.draftContract || {};
+        const seekerPayments = draft.seekerPayments || [];
+        const providerReceives = draft.providerReceives || [];
+        const isSeeker = this.currentUser.id === conv.seekerId;
+        const isProvider = this.currentUser.id === conv.providerId;
+
+        body.innerHTML = '';
+
+        if (this.contractModalStep === 1) {
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'display:grid; grid-template-columns: 1fr 1fr; gap:24px;';
+
+            // НОВОЕ: Проверяем, есть ли уже чьи-то подписи. Если да — блокируем редактирование!
+            const isLocked = conv.signedBy && conv.signedBy.length > 0;
+
+            const seekerPanel = this.createContractSidePanel(
+                'СТОРОНА А — АРЕНДАТОР ШЛЮЗА', 
+                'Вы платите вознаграждение за шлюз', 
+                seekerPayments, 
+                isSeeker, 
+                isLocked, // Передаем флаг блокировки
+                'seeker'
+            );
+            wrapper.appendChild(seekerPanel);
+
+            const providerPanel = this.createContractSidePanel(
+                'СТОРОНА Б — ПРОВАЙДЕР ШЛЮЗА', 
+                'Вы получаете вознаграждение', 
+                providerReceives, 
+                isProvider, 
+                isLocked, // Передаем флаг блокировки
+                'provider'
+            );
+            wrapper.appendChild(providerPanel);
+
+            body.appendChild(wrapper);
+
+            const note = document.createElement('div');
+            note.style.cssText = 'margin-top:20px; font-size:12.5px; color:#64748b; text-align:center;';
+            note.innerHTML = `Тип шлюза: <b>${draft.gatewayType || '—'}</b> &nbsp;•&nbsp; Лимит трат: <b>$${draft.spendLimit || 0}</b> &nbsp;•&nbsp; Вознаграждение: <b>$${draft.fee || 0}</b>`;
+            body.appendChild(note);
+        } else {
+            const totalSeeker = seekerPayments.reduce((s, p) => s + (p.amount || 0), 0);
+            const totalProvider = providerReceives.reduce((s, p) => s + (p.amount || 0), 0);
+
+            const preview = document.createElement('div');
+            preview.innerHTML = `
+                <div class="preview-summary">
+                    <div class="preview-row"><span>Тип шлюза</span><strong>${draft.gatewayType || '—'}</strong></div>
+                    <div class="preview-row"><span>Лимит трат по шлюзу</span><strong>$${ (draft.spendLimit || 0).toLocaleString() }</strong></div>
+                    <div class="preview-row"><span>Вознаграждение за услугу</span><strong>$${ (draft.fee || 0).toLocaleString() }</strong></div>
+                    <div class="preview-row" style="border-top:2px solid #e2e8f0; margin-top:8px; padding-top:10px; font-size:15px;">
+                        <span><b>ИТОГО к списанию (Сторона А)</b></span>
+                        <strong style="color:#ef4444;">$${totalSeeker.toLocaleString()}</strong>
+                    </div>
+                    <div class="preview-row" style="font-size:15px;">
+                        <span><b>ИТОГО к зачислению (Сторона Б)</b></span>
+                        <strong style="color:#10b981;">$${totalProvider.toLocaleString()}</strong>
+                    </div>
+                </div>
+
+                <h4 style="margin:16px 0 10px; font-size:15px;">Детализация платежей</h4>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
+                    <div>
+                        <div style="font-size:12px; color:#64748b; margin-bottom:6px;">Сторона А платит из счетов:</div>
+                        ${seekerPayments.length ? seekerPayments.map(p => `<div class="contract-acc-card" style="margin-bottom:6px; padding:10px 14px;"><b>$${p.amount}</b> со счёта <span style="color:#475569;">${this.getAccountNameById(p.accountId)}</span></div>`).join('') : '<i style="color:#94a3b8;">— не заполнено</i>'}
+                    </div>
+                    <div>
+                        <div style="font-size:12px; color:#64748b; margin-bottom:6px;">Сторона Б получает на счета:</div>
+                        ${providerReceives.length ? providerReceives.map(p => `<div class="contract-acc-card" style="margin-bottom:6px; padding:10px 14px;"><b>$${p.amount}</b> на счёт <span style="color:#475569;">${this.getAccountNameById(p.accountId)}</span></div>`).join('') : '<i style="color:#94a3b8;">— не заполнено</i>'}
+                    </div>
+                </div>
+            `;
+            body.appendChild(preview);
+
+            const signedBy = conv.signedBy || [];
+            const seekerSigned = signedBy.includes(conv.seekerId);
+            const providerSigned = signedBy.includes(conv.providerId);
+
+            const sigDiv = document.createElement('div');
+            sigDiv.className = 'signature-status';
+            sigDiv.innerHTML = `
+                <div class="sig-pill ${seekerSigned ? 'signed' : 'pending'}">
+                    ${seekerSigned ? '✅' : '⏳'} Сторона А (Арендатор) ${seekerSigned ? 'подписала' : 'ожидает подписи'}
+                </div>
+                <div class="sig-pill ${providerSigned ? 'signed' : 'pending'}">
+                    ${providerSigned ? '✅' : '⏳'} Сторона Б (Провайдер) ${providerSigned ? 'подписала' : 'ожидает подписи'}
+                </div>
+            `;
+            body.appendChild(sigDiv);
+
+            const statusDiv = document.createElement('div');
+            statusDiv.style.cssText = 'text-align:center; margin:16px 0; min-height:60px;';
+
+            if (conv.status === 'SIGNED_PENDING') {
+                statusDiv.innerHTML = `
+                    <div style="color:#854d0e; font-weight:600;">Контракт подписан обеими сторонами.<br>Автоматическое исполнение через <span id="countdown-timer" style="font-size:22px; font-weight:700;">30</span> сек</div>
+                    <div style="font-size:12px; color:#64748b; margin-top:4px;">В течение этого времени любая сторона может отменить сделку.</div>
+                `;
+            } else if (seekerSigned && providerSigned) {
+                statusDiv.innerHTML = `<div style="color:#166534; font-weight:600;">✅ Обе стороны подписали. Готово к исполнению.</div>`;
+            } else {
+                statusDiv.innerHTML = `<div style="color:#64748b;">Для завершения обе стороны должны подписать договор в этом окне.</div>`;
+            }
+            body.appendChild(statusDiv);
+
+            const nextBtn = document.getElementById('modalNextBtn');
+            const signBtn = document.getElementById('modalSignBtn');
+            const cancelBtn = document.getElementById('modalCancelBtn');
+
+            if (nextBtn) nextBtn.style.display = 'none';
+
+            const bothSigned = seekerSigned && providerSigned;
+            const iSigned = signedBy.includes(this.currentUser.id);
+
+            if (signBtn) {
+                // Кнопка "Подписать" показывается, если статус ACTIVE и я еще не подписал
+                signBtn.style.display = (conv.status === 'ACTIVE' && !iSigned) ? 'inline-block' : 'none';
+            }
+            
+            if (cancelBtn) {
+                // Кнопка отмены показывается в двух случаях:
+                if (conv.status === 'SIGNED_PENDING') {
+                    // 1. Идет 30-секундный таймер
+                    cancelBtn.style.display = 'inline-block';
+                    cancelBtn.innerHTML = '❌ Отменить контракт';
+                } else if (conv.status === 'ACTIVE' && iSigned && !bothSigned) {
+                    // 2. Я подписал, а партнер еще нет (отзыв подписи)
+                    cancelBtn.style.display = 'inline-block';
+                    cancelBtn.innerHTML = '↩️ Отозвать подпись';
+                } else {
+                    cancelBtn.style.display = 'none';
+                }
+            }
+        }
+    },
+
+    createContractSidePanel: function(title, subtitle, paymentsList, isMySide, isLocked, role) {
+        const panel = document.createElement('div');
+        panel.className = 'contract-side-panel';
+
+        // Редактировать можно только если это моя сторона И контракт еще никем не подписан
+        const isEditable = isMySide && !isLocked;
+
+        let html = `
+            <h4>${title} <span style="font-size:11px; opacity:0.6;">(${subtitle})</span></h4>
+            <div id="cards-${role}"></div>
+        `;
+        
+        if (isEditable) {
+            html += `<button class="add-card-btn" onclick="App.addAccountCard('${role}')">+ Добавить счёт для ${role === 'seeker' ? 'оплаты' : 'получения'}</button>`;
+        } else if (isMySide && isLocked) {
+            // Если моя сторона, но кто-то уже подписал - показываем замочек
+            html += `<div style="font-size:11.5px; color:#f59e0b; margin-top:12px; text-align:center; font-weight:600;">🔒 Изменения заблокированы (есть подписи)</div>`;
+        } else {
+            html += `<div style="font-size:11px; color:#94a3b8; margin-top:8px; text-align:center;">(Заполняется партнёром)</div>`;
+        }
+        
+        panel.innerHTML = html;
+
+        const cardsContainer = panel.querySelector(`#cards-${role}`);
+        if (paymentsList.length === 0) {
+            const empty = document.createElement('div');
+            empty.style.cssText = 'color:#94a3b8; font-size:13px; padding:12px 0; text-align:center;';
+            empty.textContent = isMySide ? 'Добавьте счета ниже' : 'Пока не заполнено';
+            cardsContainer.appendChild(empty);
+        } else {
+            paymentsList.forEach((p, idx) => {
+                const card = this.createAccountPaymentCard(p, role, idx, isEditable);
+                cardsContainer.appendChild(card);
+            });
+        }
+        return panel;
+    },
+
+    createAccountPaymentCard: function(payment, role, index, isEditable) {
+        const acc = this.getAccountById(payment.accountId);
+        const card = document.createElement('div');
+        card.className = 'contract-acc-card';
+
+        card.innerHTML = `
+            <div class="acc-header">
+                <div>
+                    <div class="acc-name">${acc ? acc.name : 'Счёт'}</div>
+                    <span class="badge" style="font-size:10px; padding:1px 6px;">${acc ? acc.type : ''}</span>
+                </div>
+                ${isEditable ? `<button class="remove-btn" title="Убрать счёт">×</button>` : ''}
+            </div>
+            <div style="font-size:12px; color:#64748b;">Баланс: $${acc ? (acc.balance || 0).toLocaleString() : '—'}</div>
+            <div class="amount-row" style="margin-top:8px;">
+                <span style="font-size:12.5px; white-space:nowrap;">Сумма $</span>
+                <input type="number" value="${payment.amount || 0}" ${isEditable ? '' : 'disabled'} style="flex:1; padding:7px 10px; font-size:14px;">
+            </div>
+        `;
+
+        if (isEditable) {
+            const removeBtn = card.querySelector('.remove-btn');
+            removeBtn.onclick = async () => {
+                if (!confirm('Убрать этот счёт из контракта?')) return;
+                const newList = [...this.contractData.draftContract[role === 'seeker' ? 'seekerPayments' : 'providerReceives']];
+                newList.splice(index, 1);
+                await this.saveMyContractPart(role, newList);
+            };
+
+            const input = card.querySelector('input');
+            let saveTimeout;
+            input.oninput = () => {
+                clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(async () => {
+                    const newList = [...this.contractData.draftContract[role === 'seeker' ? 'seekerPayments' : 'providerReceives']];
+                    newList[index].amount = parseFloat(input.value) || 0;
+                    await this.saveMyContractPart(role, newList);
+                }, 650);
+            };
+        }
+        return card;
+    },
+
+    getAccountById: function(accId) {
+        if (!accId) return null;
+        
+        // Ищем реальное название среди своих счетов
+        if (this.myAccounts) {
+            const acc = this.myAccounts.find(a => a.id === accId);
+            if (acc) return acc; // Если счет найден, возвращаем его
+        }
+        
+        // Если это счет партнера (которого у нас нет в myAccounts), маскируем ID
+        return { id: accId, name: 'Счёт партнёра (...'+accId.slice(-4)+')', type: '—', balance: 0 };
+    },
+
+    getAccountNameById: function(accId) {
+        const acc = this.getAccountById(accId);
+        return acc ? acc.name : '—';
+    },
+
+    addAccountCard: async function(role) {
+        const res = await fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } });
+        const myAccs = res.ok ? await res.json() : [];
+
+        const draftKey = role === 'seeker' ? 'seekerPayments' : 'providerReceives';
+        const currentList = this.contractData.draftContract[draftKey] || [];
+
+        const available = myAccs.filter(a => !currentList.some(p => p.accountId === a.id));
+
+        if (available.length === 0) {
+            alert('Все ваши счета уже добавлены в эту часть контракта.');
             return;
         }
 
+        const options = available.map((a, i) => `${i+1}. ${a.name} ($${a.balance})`).join('\n');
+        const choice = prompt(`Выберите счёт для добавления:\n${options}\n\nВведите номер (1-${available.length}):`);
+        if (!choice) return;
+        const idx = parseInt(choice) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= available.length) return alert('Неверный выбор');
+
+        const chosenAcc = available[idx];
+        const amountStr = prompt(`Сумма для этого счёта (макс $${chosenAcc.balance}):`, '1000');
+        const amount = parseFloat(amountStr);
+        if (!amount || amount <= 0) return;
+
+        const newList = [...currentList, { accountId: chosenAcc.id, amount }];
+        await this.saveMyContractPart(role, newList);
+    },
+
+    saveMyContractPart: async function(role, paymentsList) {
+        if (!this.currentContractConvKey) return;
+
         try {
-            const res = await fetch(`/api/conversations/${this.currentChatKey}/propose`, {
+            const res = await fetch(`/api/conversations/${this.currentContractConvKey}/propose`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
-                body: JSON.stringify({ role, accountId: accId, amount })
+                body: JSON.stringify({ role, payments: paymentsList })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Ошибка предложения');
+            if (!res.ok) throw new Error(data.error || 'Ошибка сохранения');
 
-            this.logSys(`Ваша часть контракта (${role}) отправлена партнёру.`);
-            await this.loadChatData(true);
+            this.logSys(`Ваша часть контракта (${role}) обновлена.`);
+            await this.loadContractDataAndRender();
         } catch (e) {
             alert(e.message);
         }
     },
 
-    signFinalContract: async function() {
-        if (!this.currentChatKey) return;
-        if (!confirm('Подписать финальный контракт? После второй подписи сделка будет исполнена автоматически.')) return;
+    getAccountNameById: function(accId) {
+        return accId ? accId.slice(0, 12) + '...' : '—';
+    },
+
+    signFinalContractFromModal: async function() {
+        if (!this.currentContractConvKey) return;
+        if (!confirm('Подписать финальный контракт? После второй подписи запустится таймер на 30 секунд.')) return;
 
         try {
-            const res = await fetch(`/api/conversations/${this.currentChatKey}/sign`, {
+            const res = await fetch(`/api/conversations/${this.currentContractConvKey}/sign`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${this.token}` }
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Ошибка подписи');
 
-            if (data.executed) {
-                this.logSys(`🎉 ФИНАЛЬНЫЙ КОНТРАКТ ИСПОЛНЕН! Временный шлюз создан.`);
-                this.closeChatPage();
-                setTimeout(() => {
-                    this.renderAccounts();
-                    this.updateDashboardKPIsAndPredictor();
-                }, 600);
-            } else {
-                this.logSys('Вы подписали. Ожидаем подпись второй стороны.');
-                await this.loadChatData(true);
-            }
+            this.logSys('Вы подписали договор.');
+            await this.loadContractDataAndRender();
         } catch (e) {
             alert(e.message);
         }
     },
 
-    // ============ PROFILE ============
+    cancelPendingContractFromModal: async function() {
+        if (!this.currentContractConvKey) return;
+
+        const isUnsign = this.contractData && this.contractData.status === 'ACTIVE';
+        const confirmMsg = isUnsign ? 'Отозвать свою подпись?' : 'Отменить контракт? Средства не будут перемещены.';
+
+        if (!confirm(confirmMsg)) return;
+
+        try {
+            const res = await fetch(`/api/conversations/${this.currentContractConvKey}/cancel`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Не удалось отменить');
+
+            this.logSys('Контракт отменён.');
+            this.closeContractModal();
+            if (this.currentChatKey) await this.loadChatData(true);
+            await this.renderP2PNegotiations();
+        } catch (e) {
+            alert(e.message);
+        }
+    },
+
+    startContractCountdown: function() {
+        const timerEl = () => document.getElementById('countdown-timer');
+        let seconds = 30;
+        const interval = setInterval(() => {
+            const el = timerEl();
+            if (!el || !document.getElementById('contractModal')?.classList.contains('active')) {
+                clearInterval(interval);
+                return;
+            }
+            seconds--;
+            el.textContent = Math.max(0, seconds);
+            if (seconds <= 0) {
+                clearInterval(interval);
+                setTimeout(() => {
+                    if (document.getElementById('contractModal')?.classList.contains('active')) {
+                        this.loadContractDataAndRender();
+                    }
+                }, 1200);
+            }
+        }, 1000);
+    },
+
     renderProfile: function() {
         if (!this.currentUser) return;
         document.getElementById('profile-name').innerText = this.currentUser.name;

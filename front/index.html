@@ -182,47 +182,23 @@
 
             <!-- P2P CHAT PAGE (full dedicated page, not side modal) -->
             <div id="page-p2p-chat" class="page">
-                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
-                    <button class="btn btn-secondary" onclick="App.closeChatPage()" style="padding:8px 14px; font-size:14px;">← К переговорам</button>
-                    <div>
-                        <h2 id="chatPartnerName" style="margin:0; font-size:22px;">Переговоры</h2>
-                        <small id="chatContext" style="color:var(--text-muted);"></small>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <button class="btn btn-secondary" onclick="App.closeChatPage()" style="padding:8px 14px; font-size:14px;">← К переговорам</button>
+                        <div>
+                            <h2 id="chatPartnerName" style="margin:0; font-size:22px;">Переговоры</h2>
+                            <small id="chatContext" style="color:var(--text-muted);"></small>
+                        </div>
                     </div>
+                    <button class="btn btn-primary" onclick="App.openContractModal()" style="padding:10px 20px; font-size:14.5px; display:flex; align-items:center; gap:8px;">
+                        📝 Оформить смарт-контракт
+                    </button>
                 </div>
 
                 <div class="chart-card" style="padding:0; display:flex; flex-direction:column; height: calc(100vh - 220px); max-height: 620px; overflow:hidden;">
                     
                     <!-- Messages -->
                     <div id="chatMessages" style="flex:1; overflow-y:auto; padding:20px; background:#f8fafc; font-size:14px; line-height:1.5; border-bottom:1px solid var(--border);"></div>
-                    
-                    <!-- Draft Contract Section -->
-                    <div style="padding:18px 20px; background:white; border-bottom:1px solid var(--border);">
-                        <div style="margin-bottom:10px; font-weight:600; color:var(--primary-dark); font-size:14px;">Оформление смарт-контракта (обе стороны заполняют свои части)</div>
-                        
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                            <!-- Seeker -->
-                            <div>
-                                <div style="font-size:12px; color:#64748b; margin-bottom:4px; font-weight:500;">СТОРОНА А — АРЕНДАТОР ШЛЮЗА (вы платите вознаграждение)</div>
-                                <select id="chatSeekerAccount" class="form-input" style="font-size:13px; padding:8px;"></select>
-                                <input type="number" id="chatSeekerAmount" placeholder="Сумма к оплате $" class="form-input" style="font-size:13px; padding:8px;">
-                                <button class="btn btn-secondary" style="width:100%; margin-top:6px; padding:8px; font-size:13px;" onclick="App.proposeMyContractPart('seeker')">Отправить мою часть (А)</button>
-                            </div>
-                            
-                            <!-- Provider -->
-                            <div>
-                                <div style="font-size:12px; color:#64748b; margin-bottom:4px; font-weight:500;">СТОРОНА Б — ПРОВАЙДЕР ШЛЮЗА (вы получаете вознаграждение)</div>
-                                <select id="chatProviderAccount" class="form-input" style="font-size:13px; padding:8px;"></select>
-                                <input type="number" id="chatProviderAmount" placeholder="Сумма которую получите $" class="form-input" style="font-size:13px; padding:8px;">
-                                <button class="btn btn-secondary" style="width:100%; margin-top:6px; padding:8px; font-size:13px;" onclick="App.proposeMyContractPart('provider')">Отправить мою часть (Б)</button>
-                            </div>
-                        </div>
-                        
-                        <div id="chatDraftStatus" style="font-size:12.5px; color:#64748b; margin:10px 0 6px; min-height:20px; font-weight:500;"></div>
-                        
-                        <button id="chatSignBtn" class="btn btn-primary" style="width:100%; padding:11px; font-weight:700; display:none; font-size:15px;" onclick="App.signFinalContract()">
-                            ✍️ ПОДПИСАТЬ ФИНАЛЬНЫЙ СМАРТ-КОНТРАКТ
-                        </button>
-                    </div>
                     
                     <!-- Message input bar -->
                     <div style="padding:14px 18px; background:white; display:flex; gap:10px; border-top:1px solid var(--border);">
@@ -306,6 +282,34 @@
                 <input type="number" id="transferAmount" placeholder="Сумма" class="form-input">
                 <button class="btn btn-primary" style="width:100%; margin-top:8px;" onclick="App.executeTransfer()">Отправить</button>
                 <small style="color:var(--text-muted); display:block; margin-top:6px;">Переводы между любыми счетами (в т.ч. других пользователей) с задержкой по типу системы.</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== CONTRACT MODAL (NEW 2-STEP OVERLAY) ========== -->
+    <div id="contractModal" class="modal-overlay">
+        <div onclick="App.closeContractModal(event)" style="position:absolute; inset:0;"></div>
+        
+        <div class="modal-content" onclick="event.stopImmediatePropagation()">
+            <div class="modal-header">
+                <h2>📝 Оформление смарт-контракта P2P</h2>
+                <button class="close-btn" onclick="App.closeContractModal()" style="font-size:28px; line-height:1;">×</button>
+            </div>
+            
+            <div class="stepper">
+                <div id="step1-tab" class="step active" onclick="App.switchContractStep(1)">1. Заполнение информации</div>
+                <div id="step2-tab" class="step" onclick="App.switchContractStep(2)">2. Превью договора и подпись</div>
+            </div>
+            
+            <div id="contractModalBody" class="modal-body">
+                <!-- Dynamic content injected by JS -->
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="App.closeContractModal()">Закрыть</button>
+                <button id="modalNextBtn" class="btn btn-primary" onclick="App.switchContractStep(2)">Перейти к превью →</button>
+                <button id="modalSignBtn" class="btn btn-primary" style="display:none; font-weight:700;" onclick="App.signFinalContractFromModal()">✍️ Подписать договор</button>
+                <button id="modalCancelBtn" class="btn" style="display:none; background:#ef4444; color:white; font-weight:600;" onclick="App.cancelPendingContractFromModal()">❌ Отменить контракт</button>
             </div>
         </div>
     </div>
