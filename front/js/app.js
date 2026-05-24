@@ -827,7 +827,12 @@ const App = {
         await this.loadContractDataAndRender();
     },
 
-    closeContractModal: function(ev) {
+    closeContractModal: function(e) {
+        // Добавляем очистку таймера
+        if (this.contractPollInterval) {
+            clearInterval(this.contractPollInterval);
+            this.contractPollInterval = null;
+        }
         const modal = document.getElementById('contractModal');
         if (modal) modal.classList.remove('active');
         this.currentContractConvKey = null;
@@ -859,13 +864,14 @@ const App = {
         if (!this.currentContractConvKey) return;
 
         try {
-            // НОВОЕ: Загружаем счета пользователя, чтобы показывать названия вместо ID
             if (!this.myAccounts) {
                 const accRes = await fetch('/api/accounts', { headers: { 'Authorization': `Bearer ${this.token}` } });
-                if (accRes.ok) {
-                    this.myAccounts = await accRes.json();
-                }
+                if (accRes.ok) this.myAccounts = await accRes.json();
             }
+
+            // Запоминаем текущее состояние до обновления, чтобы не перерисовывать окно просто так
+            const oldStatus = this.contractData ? this.contractData.status : null;
+            const oldSignedCount = this.contractData && this.contractData.signedBy ? this.contractData.signedBy.length : 0;
 
             const res = await fetch(`/api/conversations/${this.currentContractConvKey}`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -874,18 +880,39 @@ const App = {
             const data = await res.json();
             this.contractData = data.conversation;
 
-            if (this.contractData.status === 'SIGNED_PENDING') {
-                this.contractModalStep = 2;
+            const newStatus = this.contractData.status;
+            const newSignedCount = this.contractData.signedBy ? this.contractData.signedBy.length : 0;
+
+            // Перерисовываем интерфейс ТОЛЬКО если изменился статус или количество подписей
+            if (!oldStatus || oldStatus !== newStatus || oldSignedCount !== newSignedCount) {
+                if (this.contractData.status === 'SIGNED_PENDING') {
+                    this.contractModalStep = 2;
+                }
+                
+                this.renderContractModalContent();
+
+                if (this.contractData.status === 'SIGNED_PENDING') {
+                    this.startContractCountdown();
+                }
             }
 
-            this.renderContractModalContent();
-
-            if (this.contractData.status === 'SIGNED_PENDING') {
-                this.startContractCountdown();
+            // Запускаем тихий таймер автообновления, если он еще не запущен
+            if (!this.contractPollInterval) {
+                this.contractPollInterval = setInterval(() => {
+                    // Если окно открыто — обновляем данные
+                    const modal = document.getElementById('contractModal');
+                    if (modal && modal.style.display !== 'none') {
+                        this.loadContractDataAndRender();
+                    } else {
+                        // Если окно закрыли — останавливаем таймер
+                        clearInterval(this.contractPollInterval);
+                        this.contractPollInterval = null;
+                    }
+                }, 3000); // Проверка каждые 3 секунды
             }
+
         } catch (e) {
-            alert(e.message);
-            this.closeContractModal();
+            console.error(e);
         }
     },
 
