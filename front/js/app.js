@@ -600,11 +600,13 @@ const App = {
                 el.style.cursor = 'pointer';
                 el.onclick = () => this.openChatPage(chat.key, chat.partnerName);
 
-                const statusBadge = chat.draftReady 
-                    ? '<span class="badge" style="background:#dcfce7; color:#166534;">Готово к подписи</span>' 
-                    : chat.signedCount > 0 
-                        ? '<span class="badge" style="background:#fef3c7; color:#854d0e;">Ожидает подписи</span>' 
-                        : '<span class="badge">В процессе</span>';
+                const statusBadge = (chat.status === 'SIGNED_PENDING' || chat.signedCount === 2)
+                    ? '<span class="badge" style="background:#f59e0b; color:white;">⏳ Исполнение...</span>'
+                    : chat.signedCount === 1
+                        ? '<span class="badge" style="background:#fef3c7; color:#854d0e;">Ожидает 2-й подписи</span>'
+                        : chat.draftReady 
+                            ? '<span class="badge" style="background:#dcfce7; color:#166534;">Готово к подписи</span>' 
+                            : '<span class="badge">В процессе</span>';
 
                 el.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
