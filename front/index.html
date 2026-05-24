@@ -32,7 +32,9 @@
             </div>
             <div class="nav-item active" onclick="App.navigate('dashboard')">Dashboard</div>
             <div class="nav-item" onclick="App.navigate('accounts')">Счета</div>
-            <div class="nav-item" onclick="App.navigate('p2p')">Сделки (P2P Контракты)</div>
+            <div class="nav-item" onclick="App.navigate('p2p-market')">Рынок P2P</div>
+            <div class="nav-item" onclick="App.navigate('p2p-my')">Мои заявки</div>
+            <div class="nav-item" onclick="App.navigate('p2p-negotiations')">Переговоры</div>
             <div class="nav-item" onclick="App.navigate('profile')">Мой профиль</div>
             <div class="nav-item" id="nav-admin" onclick="App.navigate('admin')" style="display: none;">Admin Panel</div>
             
@@ -81,43 +83,151 @@
             </div>
 
             <!-- P2P CONTRACTS -->
-            <div id="page-p2p" class="page">
-                <h1>P2P Сделки — Смарт-Контракты Взаимопомощи</h1>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                    
-                    <!-- Create contract form -->
-                    <div class="chart-card">
-                        <h3>Шаг 1: Создать новый контракт</h3>
-                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Вы предоставляете обеспечение, партнёр открывает вам скоростной шлюз.</p>
-                        
-                        <div class="form-group">
-                            <label>Мой счёт-донор (откуда спишутся средства):</label>
-                            <select id="contractSourceAcc" class="form-input"></select>
+            <!-- P2P MARKET (Рынок заявок) -->
+            <div id="page-p2p-market" class="page">
+                <h1>Рынок ликвидности — Открытые заявки P2P</h1>
+                
+                <div class="chart-card" style="margin-bottom:16px;">
+                    <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:220px;">
+                            <label style="font-size:12px; color:#64748b;">Поиск по описанию / компании</label>
+                            <input type="text" id="marketSearch" class="form-input" placeholder="Например: операционные платежи..." oninput="App.filterMarketRequests()">
                         </div>
-                        <div class="form-group">
-                            <label>Партнёр (получатель контракта):</label>
-                            <select id="contractPartner" class="form-input"></select>
+                        <div>
+                            <label style="font-size:12px; color:#64748b;">Тип шлюза</label>
+                            <select id="marketTypeFilter" class="form-input" onchange="App.filterMarketRequests()">
+                                <option value="">Все типы</option>
+                                <option value="SEPA">SEPA</option>
+                                <option value="SWIFT">SWIFT</option>
+                                <option value="CARD">CARD</option>
+                            </select>
                         </div>
-                        <div class="form-group">
-                            <label>Сумма обеспечения ($):</label>
-                            <input type="number" id="contractAmount" value="10000" class="form-input">
+                        <div>
+                            <label style="font-size:12px; color:#64748b;">Мин. вознаграждение</label>
+                            <input type="number" id="marketMinFee" class="form-input" placeholder="0" style="width:90px;" oninput="App.filterMarketRequests()">
                         </div>
-                        <div class="form-group">
-                            <label>Лимит трат на арендуемом шлюзе ($):</label>
-                            <input type="number" id="contractLimit" value="8500" class="form-input">
+                        <div>
+                            <label style="font-size:12px; color:#64748b;">Макс. вознаграждение</label>
+                            <input type="number" id="marketMaxFee" class="form-input" placeholder="10000" style="width:90px;" oninput="App.filterMarketRequests()">
                         </div>
-                        <div class="form-group">
-                            <label>Комиссия за услугу ($):</label>
-                            <input type="number" id="contractFee" value="450" class="form-input">
-                        </div>
-                        
-                        <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="App.createP2PContract()">Сформировать смарт-контракт</button>
+                        <button class="btn btn-secondary" style="padding:9px 16px; height:42px;" onclick="App.renderP2PMarket()">Обновить</button>
                     </div>
+                </div>
+                
+                <div class="chart-card">
+                    <h3 style="margin-bottom:12px;">Доступные заявки на рынке</h3>
+                    <div id="marketRequestsList" style="max-height:520px; overflow-y:auto;"></div>
+                </div>
+            </div>
 
-                    <!-- Contracts list -->
-                    <div class="chart-card" style="display:flex; flex-direction:column;">
-                        <h3>Мои контракты</h3>
-                        <div id="p2p-contract-list" style="flex:1; overflow-y:auto; min-height:320px; background:#f8fafc; border-radius:8px; padding:12px; margin-top:8px;"></div>
+            <!-- P2P MY REQUESTS (Мои заявки + создание) -->
+            <div id="page-p2p-my" class="page">
+                <h1>Мои P2P заявки</h1>
+                
+                <div class="chart-card" style="margin-bottom:20px;">
+                    <h3>Создать новую публичную заявку на шлюз</h3>
+                    <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">Укажите параметры — заявка появится на рынке. Партнёры смогут откликнуться и начать переговоры в чате.</p>
+                    
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:14px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Тип шлюза</label>
+                            <select id="myReqType" class="form-input">
+                                <option value="SEPA">SEPA (быстрый)</option>
+                                <option value="SWIFT">SWIFT</option>
+                                <option value="CARD">CARD</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Требуемый лимит трат ($)</label>
+                            <input type="number" id="myReqLimit" value="8500" class="form-input">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Вознаграждение за услугу ($)</label>
+                            <input type="number" id="myReqFee" value="450" class="form-input">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Краткое описание (не конфиденциально)</label>
+                            <input type="text" id="myReqDesc" value="Нужен быстрый шлюз для операционных платежей" class="form-input">
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="App.createPublicRequest()">Опубликовать заявку на рынке</button>
+                </div>
+
+                <div class="chart-card">
+                    <h3>Мои опубликованные заявки</h3>
+                    <div id="myRequestsList" style="margin-top:12px; min-height:120px;"></div>
+                </div>
+            </div>
+
+            <!-- P2P NEGOTIATIONS (Переговоры + legacy contracts) -->
+            <div id="page-p2p-negotiations" class="page">
+                <h1>Переговоры и чаты</h1>
+                
+                <!-- Active Chats Section -->
+                <div class="chart-card" style="margin-bottom:20px;">
+                    <h3 style="margin-bottom:12px;">💬 Активные чаты / Переговоры</h3>
+                    <div id="activeChatsList" style="min-height:80px;"></div>
+                    <div style="margin-top:12px; font-size:12px; color:#64748b;">
+                        Здесь отображаются все ваши текущие переговоры (как создатель заявки, так и откликнувшийся). Нажмите на чат, чтобы открыть.
+                    </div>
+                </div>
+
+                <!-- Legacy Contracts -->
+                <div class="chart-card">
+                    <h3 style="margin-bottom:12px;">📜 Завершённые / Legacy контракты</h3>
+                    <div id="negotiationsList" style="min-height:60px;"></div>
+                </div>
+            </div>
+
+            <!-- P2P CHAT PAGE (full dedicated page, not side modal) -->
+            <div id="page-p2p-chat" class="page">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <button class="btn btn-secondary" onclick="App.closeChatPage()" style="padding:8px 14px; font-size:14px;">← К переговорам</button>
+                    <div>
+                        <h2 id="chatPartnerName" style="margin:0; font-size:22px;">Переговоры</h2>
+                        <small id="chatContext" style="color:var(--text-muted);"></small>
+                    </div>
+                </div>
+
+                <div class="chart-card" style="padding:0; display:flex; flex-direction:column; height: calc(100vh - 220px); max-height: 620px; overflow:hidden;">
+                    
+                    <!-- Messages -->
+                    <div id="chatMessages" style="flex:1; overflow-y:auto; padding:20px; background:#f8fafc; font-size:14px; line-height:1.5; border-bottom:1px solid var(--border);"></div>
+                    
+                    <!-- Draft Contract Section -->
+                    <div style="padding:18px 20px; background:white; border-bottom:1px solid var(--border);">
+                        <div style="margin-bottom:10px; font-weight:600; color:var(--primary-dark); font-size:14px;">Оформление смарт-контракта (обе стороны заполняют свои части)</div>
+                        
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                            <!-- Seeker -->
+                            <div>
+                                <div style="font-size:12px; color:#64748b; margin-bottom:4px; font-weight:500;">СТОРОНА А — АРЕНДАТОР ШЛЮЗА (вы платите вознаграждение)</div>
+                                <select id="chatSeekerAccount" class="form-input" style="font-size:13px; padding:8px;"></select>
+                                <input type="number" id="chatSeekerAmount" placeholder="Сумма к оплате $" class="form-input" style="font-size:13px; padding:8px;">
+                                <button class="btn btn-secondary" style="width:100%; margin-top:6px; padding:8px; font-size:13px;" onclick="App.proposeMyContractPart('seeker')">Отправить мою часть (А)</button>
+                            </div>
+                            
+                            <!-- Provider -->
+                            <div>
+                                <div style="font-size:12px; color:#64748b; margin-bottom:4px; font-weight:500;">СТОРОНА Б — ПРОВАЙДЕР ШЛЮЗА (вы получаете вознаграждение)</div>
+                                <select id="chatProviderAccount" class="form-input" style="font-size:13px; padding:8px;"></select>
+                                <input type="number" id="chatProviderAmount" placeholder="Сумма которую получите $" class="form-input" style="font-size:13px; padding:8px;">
+                                <button class="btn btn-secondary" style="width:100%; margin-top:6px; padding:8px; font-size:13px;" onclick="App.proposeMyContractPart('provider')">Отправить мою часть (Б)</button>
+                            </div>
+                        </div>
+                        
+                        <div id="chatDraftStatus" style="font-size:12.5px; color:#64748b; margin:10px 0 6px; min-height:20px; font-weight:500;"></div>
+                        
+                        <button id="chatSignBtn" class="btn btn-primary" style="width:100%; padding:11px; font-weight:700; display:none; font-size:15px;" onclick="App.signFinalContract()">
+                            ✍️ ПОДПИСАТЬ ФИНАЛЬНЫЙ СМАРТ-КОНТРАКТ
+                        </button>
+                    </div>
+                    
+                    <!-- Message input bar -->
+                    <div style="padding:14px 18px; background:white; display:flex; gap:10px; border-top:1px solid var(--border);">
+                        <input type="text" id="chatInput" placeholder="Напишите сообщение партнёру..." class="form-input" style="flex:1; margin:0; font-size:14px;" onkeypress="if(event.key==='Enter') App.sendChatMessage()">
+                        <button class="btn btn-primary" style="padding:10px 22px; font-size:14px;" onclick="App.sendChatMessage()">Отправить</button>
                     </div>
                 </div>
             </div>
@@ -200,56 +310,6 @@
         </div>
     </div>
 
-    <!-- CHAT / NEGOTIATION MODAL (side panel style, same design language) -->
-    <div class="side-panel right" id="chatModal" style="width: 440px; z-index: 200; box-shadow: -6px 0 30px rgba(0,0,0,0.18); display: none;">
-        <div class="panel-header">
-            <div>
-                <h2 id="chatPartnerName" style="font-size:18px; margin:0;">Переговоры</h2>
-                <small id="chatContext" style="color:var(--text-muted); font-size:11px;"></small>
-            </div>
-            <button class="close-btn" onclick="App.closeChatModal()" style="font-size:28px; line-height:1;">×</button>
-        </div>
-        <div class="panel-content" style="padding:0; display:flex; flex-direction:column; height: calc(100% - 62px);">
-            
-            <!-- Messages -->
-            <div id="chatMessages" style="flex:1; overflow-y:auto; padding:16px; background:#f8fafc; font-size:13.5px; line-height:1.45;"></div>
-            
-            <!-- Draft Contract / Propose section -->
-            <div style="border-top:1px solid var(--border); padding:14px 16px; background:white;">
-                <div style="margin-bottom:8px; font-weight:600; color:var(--primary-dark); font-size:13px;">Оформление контракта (обе стороны заполняют)</div>
-                
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
-                    <!-- Seeker part -->
-                    <div>
-                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">СТОРОНА А — АРЕНДАТОР ШЛЮЗА (вы платите)</div>
-                        <select id="chatSeekerAccount" class="form-input" style="font-size:12px; padding:6px 8px; margin-bottom:4px;"></select>
-                        <input type="number" id="chatSeekerAmount" placeholder="Сумма к оплате за услугу $" class="form-input" style="font-size:12px; padding:6px 8px;">
-                        <button class="btn btn-secondary" style="width:100%; padding:6px; font-size:12px; margin-top:4px;" onclick="App.proposeMyContractPart('seeker')">Отправить мою часть (А)</button>
-                    </div>
-                    
-                    <!-- Provider part -->
-                    <div>
-                        <div style="font-size:11px; color:#64748b; margin-bottom:4px;">СТОРОНА Б — ПРОВАЙДЕР ШЛЮЗА (вы получаете)</div>
-                        <select id="chatProviderAccount" class="form-input" style="font-size:12px; padding:6px 8px; margin-bottom:4px;"></select>
-                        <input type="number" id="chatProviderAmount" placeholder="Сумма которую получите $" class="form-input" style="font-size:12px; padding:6px 8px;">
-                        <button class="btn btn-secondary" style="width:100%; padding:6px; font-size:12px; margin-top:4px;" onclick="App.proposeMyContractPart('provider')">Отправить мою часть (Б)</button>
-                    </div>
-                </div>
-                
-                <div id="chatDraftStatus" style="font-size:11.5px; color:#64748b; margin:6px 0 8px; min-height:18px;"></div>
-                
-                <button id="chatSignBtn" class="btn btn-primary" style="width:100%; padding:9px; font-weight:700; display:none;" onclick="App.signFinalContract()">
-                    ✍️ ПОДПИСАТЬ ФИНАЛЬНЫЙ КОНТРАКТ (оба должны подписать)
-                </button>
-            </div>
-            
-            <!-- Message input -->
-            <div style="padding:12px 16px; border-top:1px solid var(--border); background:white; display:flex; gap:8px;">
-                <input type="text" id="chatInput" placeholder="Сообщение партнёру..." class="form-input" style="flex:1; margin:0; font-size:13px;" onkeypress="if(event.key==='Enter') App.sendChatMessage()">
-                <button class="btn btn-primary" style="padding:8px 16px; font-size:13px;" onclick="App.sendChatMessage()">→</button>
-            </div>
-        </div>
-    </div>
 </div>
 </body>
 </html>

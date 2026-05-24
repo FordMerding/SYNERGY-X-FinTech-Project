@@ -4,9 +4,7 @@ const App = {
     currentOpenedAcc: null,
     predictorChart: null,
     pollInterval: null,
-    lastRenderedLogTime: null,
-    currentChatKey: null,
-    chatPollInterval: null,
+    lastLogsTimestamp: null,
 
     // ============ AUTH ============
     login: async function() {
@@ -70,17 +68,8 @@ const App = {
         if (pageId === 'p2p-market') await this.renderP2PMarket();
         if (pageId === 'p2p-my') await this.renderP2PMy();
         if (pageId === 'p2p-negotiations') await this.renderP2PNegotiations();
-        if (pageId === 'p2p-chat') {
-            // Chat page activated — loadChatData is called from openChatPage
-        }
         if (pageId === 'profile') this.renderProfile();
         if (pageId === 'admin' && this.currentUser.isAdmin) this.renderAdmin();
-
-        // Cleanup chat poll when leaving chat page
-        if (pageId !== 'p2p-chat' && this.chatPollInterval) {
-            clearInterval(this.chatPollInterval);
-            this.chatPollInterval = null;
-        }
     },
 
     startPolling: function() {
@@ -103,10 +92,7 @@ const App = {
                     // Refresh current P2P sub-page silently
                     if (activePage.id === 'page-p2p-market') await this.renderP2PMarket();
                     else if (activePage.id === 'page-p2p-my') await this.renderP2PMy();
-                    else if (activePage.id === 'page-p2p-negotiations') {
-                        await this.loadMyConversations();
-                        await this.loadNegotiations();
-                    }
+                    else if (activePage.id === 'page-p2p-negotiations') await this.renderP2PNegotiations();
                 }
             } catch (e) {
                 // silent fail on poll
@@ -121,67 +107,52 @@ const App = {
             });
             if (!res.ok) return;
             const logs = await res.json();
-            if (!logs || logs.length === 0) return;
 
             const container = document.getElementById('sys-logs');
             if (!container) return;
 
-            // Incremental append (prevents flicker from full rebuild every poll)
-            const newestLogTime = logs[logs.length - 1].time;
-            const lastTime = this.lastRenderedLogTime || 0;
-
-            let added = 0;
+            container.innerHTML = '';
             logs.forEach(log => {
-                const logTime = new Date(log.time).getTime();
-                if (logTime > lastTime) {
-                    const el = document.createElement('div');
-                    el.className = 'sys-log';
-                    const timeStr = new Date(log.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    el.innerHTML = `<strong>[${timeStr}]</strong> ${log.msg}`;
+                const el = document.createElement('div');
+                el.className = 'sys-log';
+                const time = new Date(log.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                el.innerHTML = `<strong>[${time}]</strong> ${log.msg}`;
 
-                    // AI risk confirm button (only if needed)
-                    if (log.meta && log.meta.type === 'risk' && this.currentUser && !this.currentUser.autoApproveAI) {
-                        const btn = document.createElement('button');
-                        btn.textContent = '✅ Подтвердить действие ИИ';
-                        btn.style.cssText = 'margin-top:6px; padding:4px 10px; font-size:11px; background:#10b981; color:white; border:none; border-radius:5px; cursor:pointer;';
-                        btn.onclick = async () => {
-                            btn.disabled = true;
-                            btn.textContent = 'Выполняется...';
-                            try {
-                                const r = await fetch('/api/ai/confirm-risk', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
-                                    body: JSON.stringify({ accountId: log.meta.accountId })
-                                });
-                                const d = await r.json();
-                                if (r.ok) {
-                                    this.logSys('Действие ИИ подтверждено и выполнено.');
-                                    setTimeout(() => this.refreshLogs(), 400);
-                                    setTimeout(() => this.updateDashboardKPIsAndPredictor(), 600);
-                                } else {
-                                    alert(d.error || 'Ошибка подтверждения');
-                                    btn.disabled = false;
-                                    btn.textContent = '✅ Подтвердить действие ИИ';
-                                }
-                            } catch (e) {
-                                alert('Ошибка сети');
+                // Add confirmation button for AI risk actions if autoApprove is OFF
+                if (log.meta && log.meta.type === 'risk' && this.currentUser && !this.currentUser.autoApproveAI) {
+                    const btn = document.createElement('button');
+                    btn.textContent = '✅ Подтвердить действие ИИ';
+                    btn.style.cssText = 'margin-top:6px; padding:4px 10px; font-size:11px; background:#10b981; color:white; border:none; border-radius:5px; cursor:pointer;';
+                    btn.onclick = async () => {
+                        btn.disabled = true;
+                        btn.textContent = 'Выполняется...';
+                        try {
+                            const r = await fetch('/api/ai/confirm-risk', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` },
+                                body: JSON.stringify({ accountId: log.meta.accountId })
+                            });
+                            const d = await r.json();
+                            if (r.ok) {
+                                this.logSys('Действие ИИ подтверждено и выполнено.');
+                                // refresh logs and accounts
+                                setTimeout(() => this.refreshLogs(), 400);
+                                setTimeout(() => this.updateDashboardKPIsAndPredictor(), 600);
+                            } else {
+                                alert(d.error || 'Ошибка подтверждения');
                                 btn.disabled = false;
                                 btn.textContent = '✅ Подтвердить действие ИИ';
                             }
-                        };
-                        el.appendChild(btn);
-                    }
-                    container.appendChild(el);
-                    added++;
+                        } catch (e) {
+                            alert('Ошибка сети');
+                            btn.disabled = false;
+                            btn.textContent = '✅ Подтвердить действие ИИ';
+                        }
+                    };
+                    el.appendChild(btn);
                 }
+                container.appendChild(el);
             });
-
-            // Trim old logs if too many
-            while (container.children.length > 22) container.firstChild.remove();
-
-            if (added > 0 || !this.lastRenderedLogTime) {
-                this.lastRenderedLogTime = new Date(newestLogTime).getTime();
-            }
         } catch (e) {}
     },
 
@@ -434,6 +405,97 @@ const App = {
 
     // ============ P2P CONTRACTS ============
     // ============ NEW MARKET + CHAT + DUAL-SIDE CONTRACT FLOW ============
+    currentChatKey: null,
+    chatPollInterval: null,
+
+    renderP2PInterface: async function(silent = false) {
+        const container = document.getElementById('page-p2p');
+        if (!container) return;
+
+        // Build clean sectioned UI with mini sidebar nav + search/filters
+        container.innerHTML = `
+            <h1 style="margin-bottom:16px;">AbusaFin • Рынок ликвидности и P2P</h1>
+            
+            <div style="display:flex; gap:20px; align-items:flex-start;">
+                
+                <!-- MINI SIDEBAR NAV -->
+                <div style="width:205px; flex-shrink:0; background:white; border:1px solid var(--border); border-radius:14px; padding:10px 8px; box-shadow:0 2px 6px rgba(0,0,0,0.03);">
+                    <div onclick="App.switchMarketSection('market')" class="nav-item active" id="nav-market" style="margin-bottom:4px; padding:10px 14px; border-radius:9px; cursor:pointer;">🔎 Рынок заявок</div>
+                    <div onclick="App.switchMarketSection('myrequests')" class="nav-item" id="nav-myrequests" style="margin-bottom:4px; padding:10px 14px; border-radius:9px; cursor:pointer;">📋 Мои заявки</div>
+                    <div onclick="App.switchMarketSection('negotiations')" class="nav-item" id="nav-negotiations" style="padding:10px 14px; border-radius:9px; cursor:pointer;">💬 Активные переговоры</div>
+                    
+                    <div style="margin-top:22px; padding-top:12px; border-top:1px solid var(--border); font-size:11px; color:#64748b; line-height:1.4;">
+                        Создавайте публичные запросы.<br>
+                        Откликайтесь → открывайте чат.<br>
+                        Обе стороны заполняют части → подписывают.
+                    </div>
+                </div>
+
+                <!-- DYNAMIC CONTENT AREA -->
+                <div style="flex:1; min-width:0;">
+                    
+                    <!-- MARKET SECTION (search + filters + list) -->
+                    <div id="marketSection">
+                        <div class="chart-card" style="margin-bottom:16px;">
+                            <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+                                <div style="flex:1; min-width:220px;">
+                                    <label style="font-size:12px; color:#64748b;">Поиск по описанию / компании</label>
+                                    <input type="text" id="marketSearch" class="form-input" placeholder="Например: операционные платежи..." oninput="App.filterMarketRequests()">
+                                </div>
+                                <div>
+                                    <label style="font-size:12px; color:#64748b;">Тип шлюза</label>
+                                    <select id="marketTypeFilter" class="form-input" onchange="App.filterMarketRequests()">
+                                        <option value="">Все типы</option>
+                                        <option value="SEPA">SEPA</option>
+                                        <option value="SWIFT">SWIFT</option>
+                                        <option value="CARD">CARD</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size:12px; color:#64748b;">Мин. вознаграждение</label>
+                                    <input type="number" id="marketMinFee" class="form-input" placeholder="0" style="width:90px;" oninput="App.filterMarketRequests()">
+                                </div>
+                                <div>
+                                    <label style="font-size:12px; color:#64748b;">Макс. вознаграждение</label>
+                                    <input type="number" id="marketMaxFee" class="form-input" placeholder="10000" style="width:90px;" oninput="App.filterMarketRequests()">
+                                </div>
+                                <button class="btn btn-secondary" style="padding:9px 16px; height:42px;" onclick="App.renderP2PInterface(true)">Обновить</button>
+                            </div>
+                        </div>
+                        
+                        <div class="chart-card">
+                            <h3 style="margin-bottom:12px;">Открытые заявки на рынке</h3>
+                            <div id="marketRequestsList" style="max-height:420px; overflow-y:auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- MY REQUESTS SECTION -->
+                    <div id="myRequestsSection" style="display:none;">
+                        <div class="chart-card">
+                            <h3>Мои опубликованные заявки</h3>
+                            <div id="myRequestsList" style="margin-top:12px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- NEGOTIATIONS SECTION -->
+                    <div id="negotiationsSection" style="display:none;">
+                        <div class="chart-card">
+                            <h3>Активные переговоры и legacy контракты</h3>
+                            <div id="negotiationsList" style="margin-top:12px;"></div>
+                            <div style="margin-top:16px; padding:14px; background:#f8fafc; border-radius:10px; font-size:13px; color:#475569;">
+                                Активные чаты открываются автоматически при отклике на заявку.<br>
+                                Здесь отображаются завершённые legacy контракты. Новые переговоры ведутся в чате.
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        `;
+
+        // Load initial market data
+        await this.loadMarketData();
+    },
 
     // ============ MARKET HELPERS + SECTION SWITCH ============
     loadMarketData: async function() {
@@ -490,19 +552,47 @@ const App = {
         if (listEl) this.renderMarketRequestsList(listEl, filtered);
     },
 
-    // switchMarketSection REMOVED — dedicated pages now handle their own rendering.
+    switchMarketSection: async function(section) {
+        ['marketSection','myRequestsSection','negotiationsSection'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.style.display = 'none';
+        });
+        ['nav-market','nav-myrequests','nav-negotiations'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.classList.remove('active');
+        });
+
+        const target = document.getElementById(section + 'Section');
+        const navId = section === 'market' ? 'nav-market' : section === 'myrequests' ? 'nav-myrequests' : 'nav-negotiations';
+        const nav = document.getElementById(navId);
+
+        if (target) target.style.display = 'block';
+        if (nav) nav.classList.add('active');
+
+        if (section === 'myrequests') await this.loadMyRequests();
+        else if (section === 'negotiations') await this.loadNegotiations();
+        else if (section === 'market') await this.loadMarketData();
+    },
 
     loadMyRequests: async function() {
         const container = document.getElementById('myRequestsList');
         if (!container) return;
-        container.innerHTML = '';
+        container.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="App.createPublicRequest()">
+                    + Создать новую публичную заявку
+                </button>
+            </div>
+            <div id="myRequestsContent">Загрузка...</div>
+        `;
+
+        const content = document.getElementById('myRequestsContent');
 
         try {
             const res = await fetch('/api/requests?mine=true', { headers: { 'Authorization': `Bearer ${this.token}` } });
             const myReqs = res.ok ? await res.json() : [];
+            content.innerHTML = '';
 
             if (myReqs.length === 0) {
-                container.innerHTML = '<div style="padding:20px; color:#64748b; text-align:center;">У вас пока нет опубликованных заявок.<br>Создайте первую во вкладке выше.</div>';
+                content.innerHTML = '<div style="padding:20px; color:#64748b;">У вас пока нет опубликованных заявок.</div>';
                 return;
             }
 
@@ -518,10 +608,10 @@ const App = {
                         <span class="badge" style="background:${r.status === 'OPEN' ? '#dcfce7' : '#fef3c7'}; color:${r.status === 'OPEN' ? '#166534' : '#854d0e'};">${r.status}</span>
                     </div>
                 `;
-                container.appendChild(el);
+                content.appendChild(el);
             });
         } catch (e) {
-            container.innerHTML = '<div style="color:#ef4444; padding:20px;">Ошибка загрузки ваших заявок</div>';
+            content.innerHTML = '<div style="color:#ef4444; padding:20px;">Ошибка загрузки ваших заявок</div>';
         }
     },
 
@@ -552,96 +642,20 @@ const App = {
         }
     },
 
-    loadMyConversations: async function() {
-        const container = document.getElementById('activeChatsList');
-        if (!container) return;
-        container.innerHTML = '<div style="padding:12px; color:#64748b;">Загрузка чатов...</div>';
-
-        try {
-            const res = await fetch('/api/conversations', { headers: { 'Authorization': `Bearer ${this.token}` } });
-            const chats = res.ok ? await res.json() : [];
-            container.innerHTML = '';
-
-            if (chats.length === 0) {
-                container.innerHTML = `
-                    <div style="padding:20px; text-align:center; color:#64748b;">
-                        У вас пока нет активных переговоров.<br>
-                        Откликнитесь на заявку в разделе «Рынок P2P» или дождитесь отклика на вашу заявку.
-                    </div>`;
-                return;
-            }
-
-            chats.forEach(chat => {
-                const el = document.createElement('div');
-                el.className = 'contract-box';
-                el.style.cursor = 'pointer';
-                el.onclick = () => this.openChatPage(chat.key, chat.partnerName);
-
-                const statusBadge = chat.draftReady 
-                    ? '<span class="badge" style="background:#dcfce7; color:#166534;">Готово к подписи</span>' 
-                    : chat.signedCount > 0 
-                        ? '<span class="badge" style="background:#fef3c7; color:#854d0e;">Ожидает подписи</span>' 
-                        : '<span class="badge">В процессе</span>';
-
-                el.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-                        <div style="flex:1;">
-                            <strong>${chat.partnerName}</strong> <small style="color:#64748b;">(${chat.partnerCompany})</small><br>
-                            <small style="color:#475569;">${chat.requestType} • ${chat.requestDesc || 'P2P шлюз'}</small>
-                            <div style="margin-top:4px; font-size:12.5px; color:#64748b;">
-                                ${chat.lastMessagePreview}
-                            </div>
-                        </div>
-                        <div style="text-align:right; white-space:nowrap;">
-                            ${statusBadge}<br>
-                            <small style="color:#94a3b8; font-size:11px;">${new Date(chat.lastMessageTime).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</small>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(el);
-            });
-        } catch (e) {
-            container.innerHTML = '<div style="color:#ef4444; padding:12px;">Ошибка загрузки чатов</div>';
-        }
-    },
-
-    // ============ NEW DEDICATED RENDER FUNCTIONS FOR SEPARATE P2P PAGES ============
-    renderP2PMarket: async function() {
-        await this.loadMarketData();
-        // Re-apply current filters (does not reset inputs)
-        if (typeof this.filterMarketRequests === 'function') {
-            this.filterMarketRequests();
-        }
-    },
-
-    renderP2PMy: async function() {
-        await this.loadMyRequests();
-    },
-
-    renderP2PNegotiations: async function() {
-        await this.loadMyConversations();   // new active chats list
-        await this.loadNegotiations();      // legacy contracts
-    },
-
     createPublicRequest: async function() {
-        // Read from dedicated form in page-p2p-my (clean, no prompts)
-        const typeEl = document.getElementById('myReqType');
-        const limitEl = document.getElementById('myReqLimit');
-        const feeEl = document.getElementById('myReqFee');
-        const descEl = document.getElementById('myReqDesc');
+        // Simple reliable prompts (no dependency on missing DOM elements)
+        const type = prompt('Тип шлюза (SEPA / SWIFT / CARD):', 'SEPA');
+        if (!type) return;
 
-        if (!typeEl || !limitEl || !feeEl) {
-            alert('Форма создания заявки не найдена. Перейдите на вкладку «Мои заявки».');
-            return;
-        }
+        const limitStr = prompt('Требуемый лимит трат на шлюзе ($):', '8500');
+        const feeStr = prompt('Вознаграждение за услугу ($):', '450');
+        const desc = prompt('Краткое описание (не-конфиденциальное):', 'Нужен быстрый шлюз для операционных платежей');
 
-        const type = typeEl.value;
-        const limit = parseFloat(limitEl.value);
-        const fee = parseFloat(feeEl.value);
-        const desc = descEl ? descEl.value : '';
+        const limit = parseFloat(limitStr);
+        const fee = parseFloat(feeStr);
 
-        if (!type || !limit || !fee || isNaN(limit) || isNaN(fee) || limit <= 0 || fee < 0) {
-            alert('Пожалуйста, заполните корректно все поля формы (тип, лимит > 0, вознаграждение >= 0).');
+        if (!limit || !fee || isNaN(limit) || isNaN(fee)) {
+            alert('Некорректные числа');
             return;
         }
 
@@ -655,8 +669,8 @@ const App = {
             if (!res.ok) throw new Error(data.error || 'Ошибка публикации');
 
             this.logSys('Публичный запрос опубликован на рынке.');
-            // Navigate to Мои заявки page to see it in list
-            await this.navigate('p2p-my');
+            // Directly render into "Мои заявки" section — no jumping to first tab
+            await this.renderP2PInterface(true, 'myrequests');
         } catch (e) {
             alert(e.message);
         }
@@ -672,63 +686,49 @@ const App = {
             if (!res.ok) throw new Error(data.error || 'Не удалось начать переговоры');
 
             this.logSys(`Открыт чат с ${creatorCompany}. Обсудите детали и подпишите финальный контракт.`);
-            this.openChatPage(data.conversationKey, creatorCompany);
+            this.openChatModal(data.conversationKey, creatorCompany);
         } catch (e) {
             alert(e.message);
         }
     },
 
     // ============ CHAT MODAL ============
-    // ========== CHAT NOW USES FULL PAGE (page-p2p-chat) ==========
-    openChatPage: async function(convKey, partnerName = 'Партнёр') {
+    openChatModal: async function(convKey, partnerName = 'Партнёр') {
         this.currentChatKey = convKey;
+        const modal = document.getElementById('chatModal');
+        if (!modal) return;
 
-        // Set header info (elements exist in page-p2p-chat)
-        const nameEl = document.getElementById('chatPartnerName');
-        const ctxEl = document.getElementById('chatContext');
-        if (nameEl) nameEl.innerText = partnerName;
-        if (ctxEl) ctxEl.innerText = `Ключ: ${convKey}`;
+        document.getElementById('chatPartnerName').innerText = partnerName;
+        document.getElementById('chatContext').innerText = `Ключ переговоров: ${convKey}`;
 
-        await this.navigate('p2p-chat');
+        modal.style.display = 'block';
+        modal.classList.add('open');
 
         await this.loadChatData();
 
-        // Start dedicated chat polling (lighter than full page refresh)
         if (this.chatPollInterval) clearInterval(this.chatPollInterval);
         this.chatPollInterval = setInterval(() => {
-            if (this.currentChatKey && document.getElementById('page-p2p-chat')?.classList.contains('active')) {
+            const m = document.getElementById('chatModal');
+            if (this.currentChatKey && m && m.classList.contains('open')) {
                 this.loadChatData(true);
             } else {
                 if (this.chatPollInterval) clearInterval(this.chatPollInterval);
             }
-        }, 2400);
+        }, 2200);
     },
 
-    closeChatPage: function() {
+    closeChatModal: function() {
+        const modal = document.getElementById('chatModal');
+        if (modal) {
+            modal.classList.remove('open');
+            modal.style.display = 'none';
+        }
         if (this.chatPollInterval) {
             clearInterval(this.chatPollInterval);
             this.chatPollInterval = null;
         }
         this.currentChatKey = null;
-        this.navigate('p2p-negotiations');
-    },
-
-    cancelPendingContract: async function() {
-        if (!this.currentChatKey || !confirm('Отменить подписанный контракт?')) return;
-
-        try {
-            const res = await fetch(`/api/conversations/${this.currentChatKey}/cancel`, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Не удалось отменить');
-
-            this.logSys('Контракт отменён.');
-            await this.loadChatData(true);
-        } catch (e) {
-            alert(e.message);
-        }
+        setTimeout(() => this.renderP2PInterface(true), 300);
     },
 
     loadChatData: async function(silent = false) {
@@ -753,13 +753,7 @@ const App = {
                     el.innerHTML = `<div style="font-size:11px; opacity:0.7; margin-bottom:2px;">${isMe ? 'Вы' : 'Партнёр'} • ${new Date(m.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>${m.text}`;
                     msgContainer.appendChild(el);
                 });
-
-                // Smart auto-scroll: only scroll to bottom if user was already near bottom (allows reading history)
-                const threshold = 80;
-                const isNearBottom = msgContainer.scrollHeight - msgContainer.scrollTop - msgContainer.clientHeight < threshold;
-                if (isNearBottom || conv.messages.length <= 3) {
-                    msgContainer.scrollTop = msgContainer.scrollHeight;
-                }
+                msgContainer.scrollTop = msgContainer.scrollHeight;
             }
 
             // Render draft status
@@ -768,27 +762,20 @@ const App = {
             const signBtn = document.getElementById('chatSignBtn');
 
             let statusText = '';
-            const seekerPayments = draft.seekerPayments || (draft.seekerPayment ? [draft.seekerPayment] : []);
-            const providerReceives = draft.providerReceives || (draft.providerReceive ? [draft.providerReceive] : []);
+            const seekerFilled = !!draft.seekerPayment;
+            const providerFilled = !!draft.providerReceive;
 
-            const seekerFilled = seekerPayments.length > 0;
-            const providerFilled = providerReceives.length > 0;
-
-            if (conv.status === 'SIGNED_PENDING') {
-                statusText = `⏳ Контракт подписан обеими сторонами. Исполнение через ~25 сек. <button onclick="App.cancelPendingContract()" style="margin-left:8px;padding:3px 10px;font-size:11px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;">Отменить</button>`;
-                if (signBtn) signBtn.style.display = 'none';
-            } else if (seekerFilled && providerFilled) {
-                const total = seekerPayments.reduce((s, p) => s + (p.amount || 0), 0);
-                statusText = `✅ Обе стороны заполнили части (всего $${total}). Можно подписывать.`;
+            if (seekerFilled && providerFilled) {
+                statusText = `✅ Обе стороны заполнили части. Сумма: $${draft.seekerPayment.amount} → $${draft.providerReceive.amount}. Можно подписывать.`;
                 if (signBtn) signBtn.style.display = 'block';
             } else if (seekerFilled) {
-                statusText = `Сторона А заполнила ${seekerPayments.length} счёт(ов). Ожидаем часть Б.`;
+                statusText = `Сторона А заполнила свою часть ($${draft.seekerPayment.amount}). Ожидаем часть Б.`;
                 if (signBtn) signBtn.style.display = 'none';
             } else if (providerFilled) {
-                statusText = `Сторона Б заполнила ${providerReceives.length} счёт(ов). Ожидаем часть А.`;
+                statusText = `Сторона Б заполнила свою часть. Ожидаем часть А.`;
                 if (signBtn) signBtn.style.display = 'none';
             } else {
-                statusText = 'Обе стороны должны заполнить свои части (поддерживается несколько счетов).';
+                statusText = 'Обе стороны должны заполнить свои части контракта ниже.';
                 if (signBtn) signBtn.style.display = 'none';
             }
             if (statusEl) statusEl.innerHTML = statusText;
@@ -899,7 +886,7 @@ const App = {
 
             if (data.executed) {
                 this.logSys(`🎉 ФИНАЛЬНЫЙ КОНТРАКТ ИСПОЛНЕН! Временный шлюз создан.`);
-                this.closeChatPage();
+                this.closeChatModal();
                 setTimeout(() => {
                     this.renderAccounts();
                     this.updateDashboardKPIsAndPredictor();

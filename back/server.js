@@ -1,14 +1,17 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
 
 const PORT = 3000;
 const DB_PATH = path.join(__dirname, 'db.json');
 const FRONT_DIR = path.join(__dirname, '../front');
 
+// Set to true only if you want noisy simulation logs in terminal (for debugging)
+const SHOW_CONSOLE_LOGS = false;
+
 let db = null;
 let activeTokens = {}; // token -> {userId, createdAt}
+const pendingExecutions = {}; // convKey -> setTimeout id for delayed contract execution
 
 const delays = { 'SEPA': 5000, 'SWIFT': 10000, 'CARD': 20000 };
 
@@ -69,7 +72,76 @@ function addLog(msg, affectedUsers = [], meta = null) {
   db.logs.push(entry);
   if (db.logs.length > 80) db.logs.shift();
   saveDB();
-  console.log('[LOG]', msg);
+  if (SHOW_CONSOLE_LOGS) {
+    console.log('[LOG]', msg);
+  }
+}
+
+// Execute a pending contract after the review timer
+function executePendingContract(convKey) {
+  const conv = db.conversations[convKey];
+  if (!conv || conv.status !== 'SIGNED_PENDING') return;
+
+  const draft = conv.draftContract || {};
+  const seekerPayments = draft.seekerPayments || (draft.seekerPayment ? [draft.seekerPayment] : []);
+  const providerReceives = draft.providerReceives || (draft.providerReceive ? [draft.providerReceive] : []);
+
+  if (seekerPayments.length === 0 || providerReceives.length === 0) {
+    conv.status = 'CANCELLED';
+    saveDB();
+    return;
+  }
+
+  // Calculate total to pay
+  const totalPayment = seekerPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+  // Find first seeker account with enough balance (simplified for demo)
+  let remaining = totalPayment;
+  for (const p of seekerPayments) {
+    const acc = db.accounts.find(a => a.id === p.accountId);
+    if (!acc || acc.balance < p.amount) {
+      addLog(`⚠️ Ошибка исполнения: недостаточно средств на счёте ${p.accountId}`, [conv.seekerId]);
+      conv.status = 'CANCELLED';
+      saveDB();
+      return;
+    }
+    acc.balance -= p.amount;
+    remaining -= p.amount;
+  }
+
+  // Credit provider receives (distribute)
+  for (const r of providerReceives) {
+    const acc = db.accounts.find(a => a.id === r.accountId);
+    if (acc) {
+      acc.balance += r.amount;
+    }
+  }
+
+  // Create temporary gateway for seeker (only spendable)
+  const tempAcc = {
+    id: 'acc_temp_' + Math.random().toString(36).slice(2, 10),
+    userId: conv.seekerId,
+    name: `⏳ Арендованный шлюз ${draft.gatewayType} (лимит $${draft.spendLimit})`,
+    balance: draft.spendLimit,
+    reserve: 0,
+    type: draft.gatewayType,
+    isTemporary: true,
+    spendLimit: draft.spendLimit,
+    createdAt: new Date().toISOString()
+  };
+  db.accounts.push(tempAcc);
+
+  // Finalize
+  conv.status = 'EXECUTED';
+  conv.executedAt = new Date().toISOString();
+
+  const request = db.requests.find(r => r.id === conv.requestId);
+  if (request) request.status = 'CLOSED';
+
+  saveDB();
+
+  const totalPaid = seekerPayments.reduce((s, p) => s + p.amount, 0);
+  addLog(`🔐 КОНТРАКТ ИСПОЛНЕН (с задержкой). ${conv.seekerId} получил шлюз $${draft.spendLimit}. Всего переведено $${totalPaid}.`, [conv.seekerId, conv.providerId]);
 }
 
 function generateToken(userId) {
@@ -547,10 +619,11 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
       return sendJSON(res, { error: 'Нельзя отвечать на свой запрос' }, 400);
     }
 
-    // Create conversation key (sorted ids for consistency)
+    // Use requestId as conversation key. Each public request gets its own dedicated chat/negotiation.
+    // This fixes the problem where multiple contracts between the same two companies collapsed into one chat.
     const seekerId = request.creatorId;
     const providerId = currentUser.id;
-    const convKey = [seekerId, providerId].sort().join('_');
+    const convKey = reqId;
 
     if (!db.conversations[convKey]) {
       db.conversations[convKey] = {
@@ -558,13 +631,14 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
         seekerId,
         providerId,
         requestId: reqId,
+        createdAt: new Date().toISOString(),
         messages: [],
         draftContract: {
           gatewayType: request.type,
           spendLimit: request.limitWanted,
           fee: request.feeOffered,
-          seekerPayment: null,      // {accountId, amount}
-          providerReceive: null     // {accountId, amount}
+          seekerPayments: [],      // array of {accountId, amount} - multiple source accounts supported
+          providerReceives: []     // array of {accountId, amount} - multiple destination accounts supported
         },
         signedBy: [],
         status: 'ACTIVE'
@@ -575,6 +649,40 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
 
     addLog(`💬 Начаты переговоры по запросу ${reqId} между ${seekerId} и ${providerId}`, [seekerId, providerId]);
     return sendJSON(res, { success: true, conversationKey: convKey, conversation: db.conversations[convKey] });
+  }
+
+  // GET list of my conversations (for chat list UI)
+  if (pathname === '/api/conversations' && method === 'GET') {
+    const myConvs = Object.entries(db.conversations || {})
+      .filter(([key, conv]) => conv.seekerId === currentUser.id || conv.providerId === currentUser.id)
+      .map(([key, conv]) => {
+        const isSeeker = conv.seekerId === currentUser.id;
+        const partnerId = isSeeker ? conv.providerId : conv.seekerId;
+        const partner = db.users.find(u => u.id === partnerId);
+        const request = (db.requests || []).find(r => r.id === conv.requestId);
+        const lastMsg = conv.messages && conv.messages.length > 0 
+          ? conv.messages[conv.messages.length - 1] 
+          : null;
+
+        return {
+          key,
+          partnerId,
+          partnerName: partner ? partner.name : 'Unknown',
+          partnerCompany: partner ? partner.company : '',
+          requestId: conv.requestId,
+          requestType: request ? request.type : '',
+          requestDesc: request ? (request.description || '') : '',
+          status: conv.status || 'ACTIVE',
+          draftReady: !!(conv.draftContract && conv.draftContract.seekerPayment && conv.draftContract.providerReceive),
+          signedCount: (conv.signedBy || []).length,
+          lastMessageTime: lastMsg ? lastMsg.time : (conv.createdAt || new Date().toISOString()),
+          lastMessagePreview: lastMsg ? lastMsg.text.substring(0, 60) : 'Нет сообщений'
+        };
+      })
+      // sort by last activity
+      .sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+
+    return sendJSON(res, myConvs);
   }
 
   // Get conversation with partner (or by key)
@@ -638,14 +746,17 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
     const myAcc = db.accounts.find(a => a.id === accountId && a.userId === currentUser.id);
     if (!myAcc) return sendJSON(res, { error: 'Счет не найден или не ваш' }, 404);
 
+    // Support multiple accounts: push to array (user can add several sources/destinations)
     if (role === 'seeker') {
-      conv.draftContract.seekerPayment = { accountId, amount: parseFloat(amount) };
+      if (!conv.draftContract.seekerPayments) conv.draftContract.seekerPayments = [];
+      conv.draftContract.seekerPayments.push({ accountId, amount: parseFloat(amount) });
     } else {
-      conv.draftContract.providerReceive = { accountId, amount: parseFloat(amount) };
+      if (!conv.draftContract.providerReceives) conv.draftContract.providerReceives = [];
+      conv.draftContract.providerReceives.push({ accountId, amount: parseFloat(amount) });
     }
     saveDB();
 
-    addLog(`📝 ${currentUser.name} обновил свою часть контракта в переговорах`, [currentUser.id]);
+    addLog(`📝 ${currentUser.name} добавил часть контракта (${role})`, [currentUser.id]);
     return sendJSON(res, { success: true, draft: conv.draftContract });
   }
 
@@ -658,9 +769,19 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
       return sendJSON(res, { error: 'Нет доступа' }, 403);
     }
 
-    const draft = conv.draftContract;
-    if (!draft.seekerPayment || !draft.providerReceive) {
-      return sendJSON(res, { error: 'Обе стороны должны заполнить свои части контракта' }, 400);
+    const draft = conv.draftContract || {};
+
+    // Support both old single format and new array format for backward compatibility
+    const seekerPayments = draft.seekerPayments && draft.seekerPayments.length > 0 
+      ? draft.seekerPayments 
+      : (draft.seekerPayment ? [draft.seekerPayment] : []);
+    
+    const providerReceives = draft.providerReceives && draft.providerReceives.length > 0 
+      ? draft.providerReceives 
+      : (draft.providerReceive ? [draft.providerReceive] : []);
+
+    if (seekerPayments.length === 0 || providerReceives.length === 0) {
+      return sendJSON(res, { error: 'Обе стороны должны заполнить хотя бы по одному счёту в контракте' }, 400);
     }
 
     // Add signer
@@ -674,54 +795,60 @@ async function handleAPI(req, res, pathname, method, body, currentUser) {
       return sendJSON(res, { success: true, waitingForOther: true });
     }
 
-    // BOTH SIGNED → EXECUTE THE DEAL
-    const seekerAcc = db.accounts.find(a => a.id === draft.seekerPayment.accountId);
-    const providerAcc = db.accounts.find(a => a.id === draft.providerReceive.accountId);
-    const paymentAmount = draft.seekerPayment.amount;
+    // BOTH SIGNED → PENDING with timer (user can cancel during this period)
+    conv.status = 'SIGNED_PENDING';
+    conv.signedAt = new Date().toISOString();
 
-    if (!seekerAcc || !providerAcc) {
-      return sendJSON(res, { error: 'Один из счетов больше не существует' }, 400);
+    addLog(`✍️ Контракт подписан обеими сторонами. Автоматическое исполнение через 25 секунд. Можно отменить.`, [conv.seekerId, conv.providerId]);
+
+    // Clear any previous pending timeout
+    if (pendingExecutions[convKey]) {
+      clearTimeout(pendingExecutions[convKey]);
     }
-    if (seekerAcc.balance < paymentAmount) {
-      return sendJSON(res, { error: 'Недостаточно средств у арендатора шлюза' }, 400);
-    }
 
-    // 1. Payment from Seeker to Provider
-    seekerAcc.balance -= paymentAmount;
-    providerAcc.balance += paymentAmount;
-
-    // 2. Create temporary gateway FOR THE SEEKER (the one who needed liquidity)
-    const tempAcc = {
-      id: 'acc_temp_' + Math.random().toString(36).slice(2, 10),
-      userId: conv.seekerId,
-      name: `⏳ Арендованный шлюз ${draft.gatewayType} (лимит $${draft.spendLimit})`,
-      balance: draft.spendLimit,
-      reserve: 0,
-      type: draft.gatewayType,
-      isTemporary: true,
-      spendLimit: draft.spendLimit,
-      createdAt: new Date().toISOString()
-    };
-    db.accounts.push(tempAcc);
-
-    // 3. Close everything
-    conv.status = 'EXECUTED';
-    conv.executedAt = new Date().toISOString();
-
-    const request = db.requests.find(r => r.id === conv.requestId);
-    if (request) request.status = 'CLOSED';
+    // Delayed execution (gives time to review and cancel)
+    pendingExecutions[convKey] = setTimeout(() => {
+      try {
+        executePendingContract(convKey);
+      } catch (e) {
+        console.error('Delayed contract execution error:', e);
+      }
+      delete pendingExecutions[convKey];
+    }, 25000);
 
     saveDB();
-
-    const execLog = `🔐 ФИНАЛЬНЫЙ КОНТРАКТ ИСПОЛНЕН! ${conv.seekerId} получил временный шлюз $${draft.spendLimit}. $${paymentAmount} переведено ${conv.providerId} за услугу.`;
-    addLog(execLog, [conv.seekerId, conv.providerId]);
-
-    return sendJSON(res, {
-      success: true,
-      executed: true,
-      tempAccountId: tempAcc.id,
-      payment: paymentAmount
+    return sendJSON(res, { 
+      success: true, 
+      pendingExecution: true, 
+      delaySeconds: 25,
+      message: 'Контракт в статусе ожидания. У вас есть 25 секунд на отмену.' 
     });
+  }
+
+  // Cancel pending contract (during SIGNED_PENDING window)
+  if (pathname.match(/^\/api\/conversations\/([^/]+)\/cancel$/) && method === 'POST') {
+    const convKey = pathname.split('/')[3];
+    const conv = db.conversations[convKey];
+    if (!conv) return sendJSON(res, { error: 'Чат не найден' }, 404);
+    if (conv.seekerId !== currentUser.id && conv.providerId !== currentUser.id) {
+      return sendJSON(res, { error: 'Нет доступа' }, 403);
+    }
+    if (conv.status !== 'SIGNED_PENDING') {
+      return sendJSON(res, { error: 'Можно отменить только контракт в статусе ожидания' }, 400);
+    }
+
+    if (pendingExecutions[convKey]) {
+      clearTimeout(pendingExecutions[convKey]);
+      delete pendingExecutions[convKey];
+    }
+
+    conv.status = 'CANCELLED';
+    conv.cancelledAt = new Date().toISOString();
+    conv.cancelledBy = currentUser.id;
+
+    saveDB();
+    addLog(`❌ Контракт отменён ${currentUser.name}.`, [conv.seekerId, conv.providerId]);
+    return sendJSON(res, { success: true, cancelled: true });
   }
 
   // USERS (for P2P partner selection)
@@ -865,8 +992,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const parsedUrl = url.parse(req.url, true);
-  let pathname = parsedUrl.pathname;
+  const fullUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  let pathname = fullUrl.pathname;
 
   // Normalize
   if (pathname === '') pathname = '/';
