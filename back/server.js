@@ -42,8 +42,8 @@ function initDB() {
   db = {
     users: [
       { id: 'u_admin', login: 'admin', pass: '123', name: 'Администратор', company: 'AbusaFin Corp', isAdmin: true, autoApproveAI: false },
-      { id: 'u_1', login: 'user1', pass: '123', name: 'Иван (User 1)', company: 'Tech Logistics', isAdmin: false, autoApproveAI: false },
-      { id: 'u_2', login: 'user2', pass: '123', name: 'Олег (User 2)', company: 'Fast Liquidity Ltd', isAdmin: false, autoApproveAI: false }
+      { id: 'u_1', login: 'user1', pass: '123', name: 'Абуса-Карим', company: 'Tech Logistics', isAdmin: false, autoApproveAI: false },
+      { id: 'u_2', login: 'user2', pass: '123', name: 'Абуса-Нурис', company: 'Fast Liquidity Ltd', isAdmin: false, autoApproveAI: false }
     ],
     accounts: [
       { id: 'acc_1', userId: 'u_admin', name: 'Основной счет', balance: 50000, reserve: 10000, type: 'SEPA' },
