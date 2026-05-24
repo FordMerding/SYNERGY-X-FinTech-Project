@@ -48,9 +48,10 @@ function initDB() {
     accounts: [
       { id: 'acc_1', userId: 'u_admin', name: 'Основной счет', balance: 50000, reserve: 10000, type: 'SEPA' },
       { id: 'acc_2', userId: 'u_admin', name: 'Резервный счет', balance: 45000, reserve: 5000, type: 'SWIFT' },
-      { id: 'acc_3', userId: 'u_1', name: 'Основной (Медленный)', balance: 5000, reserve: 1000, type: 'SWIFT' },
+      { id: 'acc_3', userId: 'u_1', name: 'Основной (Медленный)', balance: 5000, reserve: 1000, type: 'SEPA' },
       { id: 'acc_4', userId: 'u_1', name: 'Резервный Валютный', balance: 45000, reserve: 5000, type: 'SWIFT' },
-      { id: 'acc_5', userId: 'u_2', name: 'Экспресс-Шлюз Скоростной', balance: 30000, reserve: 0, type: 'SEPA' }
+      { id: 'acc_5', userId: 'u_2', name: 'Экспресс-Шлюз Скоростной', balance: 30000, reserve: 0, type: 'SEPA' },
+      { id: 'acc_5', userId: 'u_2', name: 'Резервный Валютный', balance: 30000, reserve: 0, type: 'SWIFT' }
     ],
     contracts: [],
     externalDb: [],
